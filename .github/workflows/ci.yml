@@ -21,6 +21,16 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
       - run: cargo build --release --target ${{ matrix.target }}
+      - name: diagnose
+        run: |
+          cat /proc/sys/kernel/yama/ptrace_scope; uname -r
+          mkfifo /tmp/p; sleep 30 > /tmp/p & cat < /tmp/p > /dev/null & sleep 0.5
+          P=$!; ls -l /proc/$P/fd || true; cat /proc/$P/wchan || true; echo; cat /proc/$P/syscall || true
+          cat /proc/$P/stat; ls -ld /proc/$P/fd /proc/$P/task/$P/wchan /proc/$P/task/$P/syscall
+          python3 -c 'import socket,time; s=socket.socket(); s.bind(("127.0.0.1",0)); s.listen(); c=socket.create_connection(s.getsockname()); c.recv(1)' & sleep 0.5
+          cat /proc/$!/wchan || true; echo
+          target/${{ matrix.target }}/release/wits -t 0.5 $P || true
+          sudo target/${{ matrix.target }}/release/wits -t 0.5 $P || true
       - name: cases, as an ordinary user
         run: cases/run.sh target/${{ matrix.target }}/release/wits
       - name: cases, as root (adds the cgroup-limit cases)
