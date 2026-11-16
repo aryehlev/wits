@@ -193,7 +193,8 @@ fn by_wchan(w: Option<&str>, d: bool) -> Wait {
         Wait::Park {
             what: "terminal input",
         }
-    } else if has(w, W_SOCK) {
+    } else if has(w, W_SOCK) || w.contains("wait_woken") {
+        // wait_woken is shared by socket and terminal reads.
         Wait::Blind { what: "socket" }
     } else if w.contains("sigsuspend") || w.contains("sigtimedwait") || w.contains("pause") {
         Wait::Park { what: "a signal" }

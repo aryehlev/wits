@@ -557,7 +557,10 @@ impl<'a> Ctx<'a> {
                     .map(|(fd, _)| *fd)
                     .collect();
                 c.sort_unstable();
-                if c.len() == 1 {
+                let has_tty = self.p.fds.values().any(|i| i.kind == FdKind::Tty);
+                if c.is_empty() && *what == "socket" && has_tty {
+                    r(Cat::Idle, "waiting for terminal input".into(), None)
+                } else if c.len() == 1 {
                     r(
                         Cat::Peer,
                         format!("blocked on fd {}, {}", c[0], self.fd_desc(c[0])),
@@ -1403,10 +1406,20 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
     }
     // Less than 5% of one thread's time doing or waiting for anything.
     if active_ns < 0.05 * window_ns {
+        // Blocked on something hidden from us, or parked on a futex we
+        // cannot classify as lock or idle: do not call it idle.
+        let hidden = matches!(
+            top_wait(Cat::Idle),
+            Some((
+                Wait::Unknown { .. } | Wait::Futex { .. } | Wait::Events { kind: EV_BLIND, .. },
+                _
+            ))
+        );
         if blind {
-            // Blocked, but on what is hidden from us: do not call it idle.
             ans.confidence = "low";
-            ans.state = "unknown";
+            if hidden {
+                ans.state = "unknown";
+            }
         }
         return Some(ans);
     }

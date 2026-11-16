@@ -51,7 +51,8 @@ pub fn headline(a: &Answer) -> String {
     match a.state {
         "stopped" => format!("{who} is {}, not slow", a.idle_what),
         "unknown" => format!(
-            "{who} is blocked, but wits cannot see on what ({} of the last {secs:.1}s)",
+            "{who} is blocked, but wits cannot see on what: {} ({} of the last {secs:.1}s)",
+            a.idle_what,
             pct(a.idle)
         ),
         "idle" => format!(
