@@ -115,7 +115,10 @@ pub enum Syscall {
     Running,
     /// Blocked outside any system call (page fault, signal stop).
     Outside,
-    In { nr: i64, args: [u64; 6] },
+    In {
+        nr: i64,
+        args: [u64; 6],
+    },
 }
 
 pub fn parse_syscall(s: &str) -> Option<Syscall> {
@@ -163,7 +166,9 @@ pub fn cmdline(pid: i32) -> String {
         .filter(|p| !p.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
-    s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
+    s.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
 }
 
 pub fn comm(pid: i32) -> Option<String> {
@@ -239,7 +244,10 @@ pub fn children(pid: i32) -> Vec<i32> {
     for tid in tids(pid) {
         if let Some(s) = slurp(&format!("/proc/{pid}/task/{tid}/children")) {
             have = true;
-            out.extend(s.split_ascii_whitespace().filter_map(|x| x.parse::<i32>().ok()));
+            out.extend(
+                s.split_ascii_whitespace()
+                    .filter_map(|x| x.parse::<i32>().ok()),
+            );
         }
     }
     if !have {

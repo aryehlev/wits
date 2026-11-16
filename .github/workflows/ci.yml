@@ -1,0 +1,27 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --component clippy --target ${{ matrix.target }}
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build --release --target ${{ matrix.target }}
+      - name: cases, as an ordinary user
+        run: cases/run.sh target/${{ matrix.target }}/release/wits
+      - name: cases, as root (adds the cgroup-limit cases)
+        run: sudo cases/run.sh target/${{ matrix.target }}/release/wits

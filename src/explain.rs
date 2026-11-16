@@ -20,7 +20,14 @@ pub enum Cat {
     Idle,
 }
 
-pub const CAUSES: [Cat; 6] = [Cat::Cpu, Cat::CpuWait, Cat::Disk, Cat::Memory, Cat::Lock, Cat::Peer];
+pub const CAUSES: [Cat; 6] = [
+    Cat::Cpu,
+    Cat::CpuWait,
+    Cat::Disk,
+    Cat::Memory,
+    Cat::Lock,
+    Cat::Peer,
+];
 
 impl Cat {
     pub fn key(self) -> &'static str {
@@ -69,7 +76,12 @@ pub struct Blame {
 
 impl Blame {
     fn new(kind: &'static str, text: String) -> Blame {
-        Blame { kind, pid: None, name: None, text }
+        Blame {
+            kind,
+            pid: None,
+            name: None,
+            text,
+        }
     }
 }
 
@@ -160,7 +172,11 @@ impl<'a> Ctx<'a> {
         let any_sock = p.fds.values().any(|i| matches!(i.kind, FdKind::Socket(_)));
         Ctx {
             p,
-            socks: if any_sock { net::sockets(p.pid) } else { HashMap::new() },
+            socks: if any_sock {
+                net::sockets(p.pid)
+            } else {
+                HashMap::new()
+            },
             same_ns: net::same_netns(p.pid),
             link_count,
             swap_in,
@@ -181,7 +197,9 @@ impl<'a> Ctx<'a> {
                 }
             }
             FdKind::Socket(ino) => match self.socks.get(ino) {
-                Some(Sock::Tcp { listening: true, .. }) => Role::Listener,
+                Some(Sock::Tcp {
+                    listening: true, ..
+                }) => Role::Listener,
                 Some(Sock::Tcp { .. }) => Role::Conn,
                 Some(Sock::Udp { remote, .. }) => {
                     if remote.is_unset() {
@@ -190,8 +208,14 @@ impl<'a> Ctx<'a> {
                         Role::Conn
                     }
                 }
-                Some(Sock::Unix { listening: true, .. }) => Role::Listener,
-                Some(Sock::Unix { stream: true, connected: true, .. }) => Role::Conn,
+                Some(Sock::Unix {
+                    listening: true, ..
+                }) => Role::Listener,
+                Some(Sock::Unix {
+                    stream: true,
+                    connected: true,
+                    ..
+                }) => Role::Conn,
                 _ => Role::Dgram,
             },
             FdKind::Tty => Role::Tty,
@@ -203,9 +227,15 @@ impl<'a> Ctx<'a> {
 
     fn sock_desc(&self, ino: u64) -> String {
         match self.socks.get(&ino) {
-            Some(Sock::Tcp { local, listening: true, .. }) => format!("TCP listener on port {}", local.port),
+            Some(Sock::Tcp {
+                local,
+                listening: true,
+                ..
+            }) => format!("TCP listener on port {}", local.port),
             Some(Sock::Tcp { local, remote, .. }) => {
-                let svc = net::port_name(remote.port).map(|n| format!(" ({n})")).unwrap_or_default();
+                let svc = net::port_name(remote.port)
+                    .map(|n| format!(" ({n})"))
+                    .unwrap_or_default();
                 format!("TCP {local} → {remote}{svc}")
             }
             Some(Sock::Udp { local, remote }) => {
@@ -219,11 +249,15 @@ impl<'a> Ctx<'a> {
                 if !path.is_empty() {
                     return format!("Unix socket {path}");
                 }
-                let peer_path = if self.same_ns { net::unix_peer(ino) } else { None }
-                    .and_then(|pi| match self.socks.get(&pi) {
-                        Some(Sock::Unix { path, .. }) if !path.is_empty() => Some(path.clone()),
-                        _ => None,
-                    });
+                let peer_path = if self.same_ns {
+                    net::unix_peer(ino)
+                } else {
+                    None
+                }
+                .and_then(|pi| match self.socks.get(&pi) {
+                    Some(Sock::Unix { path, .. }) if !path.is_empty() => Some(path.clone()),
+                    _ => None,
+                });
                 match peer_path {
                     Some(p) => format!("Unix socket to {p}"),
                     None => "a Unix socket".into(),
@@ -254,7 +288,12 @@ impl<'a> Ctx<'a> {
             return None;
         };
         match self.socks.get(&ino)? {
-            Sock::Tcp { local, remote, listening: false, .. } => net::tcp_info(local, remote),
+            Sock::Tcp {
+                local,
+                remote,
+                listening: false,
+                ..
+            } => net::tcp_info(local, remote),
             _ => None,
         }
     }
@@ -271,7 +310,11 @@ impl<'a> Ctx<'a> {
     }
 
     fn events(&self, kind: u8, a: u64, n: u64) -> Res {
-        let idle = |label: &str| Res { cat: Cat::Idle, label: label.to_string(), fd: None };
+        let idle = |label: &str| Res {
+            cat: Cat::Idle,
+            label: label.to_string(),
+            fd: None,
+        };
         let watched: Vec<i32> = match self.p.evsets.get(&(kind, a, n)) {
             Some(Some(v)) => v.clone(),
             // The watched set is not visible: fall back to every descriptor.
@@ -294,15 +337,29 @@ impl<'a> Ctx<'a> {
         if roles.iter().any(|(_, r)| *r == Role::Tty) {
             return idle("waiting for terminal input");
         }
-        let conns: Vec<i32> = roles.iter().filter(|(_, r)| *r == Role::Conn).map(|x| x.0).collect();
-        let listener = roles.iter().find(|(_, r)| *r == Role::Listener).map(|x| x.0);
+        let conns: Vec<i32> = roles
+            .iter()
+            .filter(|(_, r)| *r == Role::Conn)
+            .map(|x| x.0)
+            .collect();
+        let listener = roles
+            .iter()
+            .find(|(_, r)| *r == Role::Listener)
+            .map(|x| x.0);
         if conns.is_empty() {
             return match listener {
-                Some(fd) => idle(&format!("waiting for new connections ({})", self.fd_desc(fd))),
+                Some(fd) => idle(&format!(
+                    "waiting for new connections ({})",
+                    self.fd_desc(fd)
+                )),
                 None => idle("waiting for datagrams or events"),
             };
         }
-        let verb = if exact { "polling" } else { "waiting for events; it holds" };
+        let verb = if exact {
+            "polling"
+        } else {
+            "waiting for events; it holds"
+        };
         if listener.is_none() && roles.len() <= 2 {
             let fd = conns[0];
             return Res {
@@ -324,7 +381,10 @@ impl<'a> Ctx<'a> {
                 }
             }
         }
-        idle(&format!("an event loop watching {} connections, none with an unanswered request", conns.len()))
+        idle(&format!(
+            "an event loop watching {} connections, none with an unanswered request",
+            conns.len()
+        ))
     }
 
     fn resolve(&self, w: &Wait) -> Res {
@@ -335,25 +395,61 @@ impl<'a> Ctx<'a> {
                     Some(i) => format!(" on {}", i.link),
                     None => String::new(),
                 };
-                let what = if sys.is_empty() { "uninterruptible I/O".to_string() } else { format!("{sys}(){on}") };
+                let what = if sys.is_empty() {
+                    "uninterruptible I/O".to_string()
+                } else {
+                    format!("{sys}(){on}")
+                };
                 r(Cat::Disk, what, Some(*fd).filter(|f| *f >= 0))
             }
             Wait::Fault => {
                 if self.swap_in {
-                    r(Cat::Memory, "pages being read back in from swap".into(), None)
+                    r(
+                        Cat::Memory,
+                        "pages being read back in from swap".into(),
+                        None,
+                    )
                 } else if self.limit_hit {
-                    r(Cat::Memory, "its pages keep being evicted and read back from disk".into(), None)
+                    r(
+                        Cat::Memory,
+                        "its pages keep being evicted and read back from disk".into(),
+                        None,
+                    )
                 } else {
-                    r(Cat::Disk, "page faults reading its own code or mapped files from disk".into(), None)
+                    r(
+                        Cat::Disk,
+                        "page faults reading its own code or mapped files from disk".into(),
+                        None,
+                    )
                 }
             }
-            Wait::Mem { why } => r(Cat::Memory, format!("reclaiming memory in the kernel ({why})"), None),
-            Wait::Futex { lockish: true, addr, pi } => {
-                let k = if *pi { "priority-inheritance mutex" } else { "mutex" };
-                let at = if *addr != 0 { format!(" at {addr:#x}") } else { String::new() };
+            Wait::Mem { why } => r(
+                Cat::Memory,
+                format!("reclaiming memory in the kernel ({why})"),
+                None,
+            ),
+            Wait::Futex {
+                lockish: true,
+                addr,
+                pi,
+            } => {
+                let k = if *pi {
+                    "priority-inheritance mutex"
+                } else {
+                    "mutex"
+                };
+                let at = if *addr != 0 {
+                    format!(" at {addr:#x}")
+                } else {
+                    String::new()
+                };
                 r(Cat::Lock, format!("a {k}{at} inside the process"), None)
             }
-            Wait::Futex { .. } => r(Cat::Idle, "parked threads (idle or waiting on a condition)".into(), None),
+            Wait::Futex { .. } => r(
+                Cat::Idle,
+                "parked threads (idle or waiting on a condition)".into(),
+                None,
+            ),
             Wait::FileLock { fd } => {
                 let on = match self.p.fds.get(fd) {
                     Some(i) => format!("the file lock on {}", i.link),
@@ -367,37 +463,85 @@ impl<'a> Ctx<'a> {
                 match (self.role(*fd), *write) {
                     (Role::Conn, false) => r(
                         Cat::Peer,
-                        format!("blocked in {sys}() on fd {fd}, {desc}{}", self.timing_suffix(*fd)),
+                        format!(
+                            "blocked in {sys}() on fd {fd}, {desc}{}",
+                            self.timing_suffix(*fd)
+                        ),
                         Some(*fd),
                     ),
                     (Role::Conn, true) | (Role::Tty, true) => r(
                         Cat::Peer,
-                        format!("blocked in {sys}() to fd {fd}, {desc}: the other end is not reading"),
+                        format!(
+                            "blocked in {sys}() to fd {fd}, {desc}: the other end is not reading"
+                        ),
                         Some(*fd),
                     ),
                     (Role::Tty, false) => r(Cat::Idle, "waiting for terminal input".into(), None),
-                    (Role::Listener, _) => r(Cat::Idle, format!("waiting for new connections ({desc})"), None),
-                    (Role::Wake, _) => r(Cat::Idle, "waiting on its own timers and events".into(), None),
-                    (Role::Dgram, _) => r(Cat::Idle, format!("waiting for datagrams on {desc}"), None),
+                    (Role::Listener, _) => r(
+                        Cat::Idle,
+                        format!("waiting for new connections ({desc})"),
+                        None,
+                    ),
+                    (Role::Wake, _) => r(
+                        Cat::Idle,
+                        "waiting on its own timers and events".into(),
+                        None,
+                    ),
+                    (Role::Dgram, _) => {
+                        r(Cat::Idle, format!("waiting for datagrams on {desc}"), None)
+                    }
                     (Role::File, _) => r(Cat::Disk, format!("{sys}() on {desc}"), Some(*fd)),
                     (Role::Dev, _) => r(Cat::Idle, format!("waiting on device {desc}"), None),
-                    (Role::Unknown, _) => r(Cat::Idle, format!("blocked in {sys}() on fd {fd}, which wits cannot see"), None),
+                    (Role::Unknown, _) => r(
+                        Cat::Idle,
+                        format!("blocked in {sys}() on fd {fd}, which wits cannot see"),
+                        None,
+                    ),
                 }
             }
-            Wait::Connect { fd } => r(Cat::Peer, format!("connecting: {}", self.fd_desc(*fd)), Some(*fd)),
+            Wait::Connect { fd } => r(
+                Cat::Peer,
+                format!("connecting: {}", self.fd_desc(*fd)),
+                Some(*fd),
+            ),
             Wait::Open { ptr } => {
-                let path = self.p.strs.get(ptr).cloned().unwrap_or_else(|| "a FIFO".into());
-                r(Cat::Peer, format!("opening {path}: nobody has opened the other end"), None)
+                let path = self
+                    .p
+                    .strs
+                    .get(ptr)
+                    .cloned()
+                    .unwrap_or_else(|| "a FIFO".into());
+                r(
+                    Cat::Peer,
+                    format!("opening {path}: nobody has opened the other end"),
+                    None,
+                )
             }
             Wait::Events { kind, a, n } => self.events(*kind, *a, *n),
-            Wait::Ipc { sys } => r(Cat::Peer, format!("blocked in {sys}() on a System V or POSIX IPC object"), None),
-            Wait::Child => r(Cat::Peer, "waiting for its child processes to finish".into(), None),
+            Wait::Ipc { sys } => r(
+                Cat::Peer,
+                format!("blocked in {sys}() on a System V or POSIX IPC object"),
+                None,
+            ),
+            Wait::Child => r(
+                Cat::Peer,
+                "waiting for its child processes to finish".into(),
+                None,
+            ),
             Wait::Sleep => r(Cat::Idle, "asleep on its own timer".into(), None),
             Wait::Accept { fd } => {
-                let d = if *fd >= 0 { format!(" ({})", self.fd_desc(*fd)) } else { String::new() };
+                let d = if *fd >= 0 {
+                    format!(" ({})", self.fd_desc(*fd))
+                } else {
+                    String::new()
+                };
                 r(Cat::Idle, format!("waiting for new connections{d}"), None)
             }
-            Wait::Stopped => r(Cat::Idle, "stopped by a signal (Ctrl-Z, SIGSTOP or a debugger)".into(), None),
+            Wait::Stopped => r(
+                Cat::Idle,
+                "stopped by a signal (Ctrl-Z, SIGSTOP or a debugger)".into(),
+                None,
+            ),
             Wait::Park { what } => r(Cat::Idle, format!("waiting for {what}"), None),
             Wait::Blind { what } => {
                 // Guess the descriptor when there is only one candidate.
@@ -414,16 +558,32 @@ impl<'a> Ctx<'a> {
                     .collect();
                 c.sort_unstable();
                 if c.len() == 1 {
-                    r(Cat::Peer, format!("blocked on fd {}, {}", c[0], self.fd_desc(c[0])), Some(c[0]))
+                    r(
+                        Cat::Peer,
+                        format!("blocked on fd {}, {}", c[0], self.fd_desc(c[0])),
+                        Some(c[0]),
+                    )
                 } else {
                     r(Cat::Peer, format!("blocked on a {what}"), None)
                 }
             }
             Wait::Unknown { d: true, why } => {
-                let w = if why.is_empty() { String::new() } else { format!(" ({why})") };
-                r(Cat::Disk, format!("uninterruptible wait in the kernel{w}"), None)
+                let w = if why.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({why})")
+                };
+                r(
+                    Cat::Disk,
+                    format!("uninterruptible wait in the kernel{w}"),
+                    None,
+                )
             }
-            Wait::Unknown { .. } => r(Cat::Idle, "blocked on something wits cannot see".into(), None),
+            Wait::Unknown { .. } => r(
+                Cat::Idle,
+                "blocked on something wits cannot see".into(),
+                None,
+            ),
         }
     }
 }
@@ -504,10 +664,20 @@ fn pick(mut c: Vec<i32>, target: i32) -> Option<(i32, usize)> {
 fn doing(pid: i32) -> Option<String> {
     if waiting_on_child(pid) {
         if let Some((c, _)) = newest_child(pid) {
-            return Some(format!("only waiting for its child pid {c} ({})", proc::comm(c).unwrap_or_default()));
+            return Some(format!(
+                "only waiting for its child pid {c} ({})",
+                proc::comm(c).unwrap_or_default()
+            ));
         }
     }
-    let a = analyze(pid, Opts { dur: Duration::from_millis(200), follow: false, light: true })?;
+    let a = analyze(
+        pid,
+        Opts {
+            dur: Duration::from_millis(200),
+            follow: false,
+            light: true,
+        },
+    )?;
     Some(match a.cause {
         Some(Cat::Cpu) => "busy on CPU".into(),
         Some(Cat::Peer) => "itself waiting for someone else".into(),
@@ -520,8 +690,14 @@ fn doing(pid: i32) -> Option<String> {
 
 fn process_blame(pid: i32, more: usize, lead: &str) -> Blame {
     let name = proc::label(pid);
-    let d = doing(pid).map(|d| format!(", which is {d}")).unwrap_or_default();
-    let extra = if more > 0 { format!(" (and {more} more)") } else { String::new() };
+    let d = doing(pid)
+        .map(|d| format!(", which is {d}"))
+        .unwrap_or_default();
+    let extra = if more > 0 {
+        format!(" (and {more} more)")
+    } else {
+        String::new()
+    };
     Blame {
         kind: "process",
         pid: Some(pid),
@@ -550,9 +726,17 @@ fn peer_blame(cx: &Ctx, res: &Res, wait: &Wait) -> Blame {
             None => Blame::new("unknown", "a child process that has already gone".into()),
         };
     }
-    let unseen = || Blame::new("unknown", "the other end is held by a process wits cannot see (another user's?)".into());
+    let unseen = || {
+        Blame::new(
+            "unknown",
+            "the other end is held by a process wits cannot see (another user's?)".into(),
+        )
+    };
     let Some(fd) = res.fd else {
-        return Blame::new("unknown", "wits cannot tell which process is at the other end".into());
+        return Blame::new(
+            "unknown",
+            "wits cannot tell which process is at the other end".into(),
+        );
     };
     let Some(info) = cx.p.fds.get(&fd) else {
         return unseen();
@@ -563,7 +747,10 @@ fn peer_blame(cx: &Ctx, res: &Res, wait: &Wait) -> Blame {
             Some((p, more)) => process_blame(p, more, ""),
             None => unseen(),
         },
-        FdKind::Tty => Blame::new("unknown", "the terminal (or whoever reads it) is not consuming output".into()),
+        FdKind::Tty => Blame::new(
+            "unknown",
+            "the terminal (or whoever reads it) is not consuming output".into(),
+        ),
         FdKind::Socket(ino) => match cx.socks.get(ino) {
             Some(Sock::Tcp { local, remote, .. }) => {
                 let local_ips: HashSet<_> = cx
@@ -576,14 +763,29 @@ fn peer_blame(cx: &Ctx, res: &Res, wait: &Wait) -> Blame {
                     .collect();
                 let is_local = remote.ip().is_loopback() || local_ips.contains(&remote.ip());
                 if !is_local {
-                    let svc = net::port_name(remote.port).map(|n| format!(" ({n})")).unwrap_or_default();
-                    return Blame::new("remote", format!("remote host {remote}{svc}: not a process on this machine"));
+                    let svc = net::port_name(remote.port)
+                        .map(|n| format!(" ({n})"))
+                        .unwrap_or_default();
+                    return Blame::new(
+                        "remote",
+                        format!("remote host {remote}{svc}: not a process on this machine"),
+                    );
                 }
                 let mut peer_ino = None;
                 let mut listen_ino = None;
                 for (i, s) in &cx.socks {
-                    if let Sock::Tcp { local: l, remote: r, listening, .. } = s {
-                        if !listening && l.port == remote.port && r.port == local.port && l.ip() == remote.ip() {
+                    if let Sock::Tcp {
+                        local: l,
+                        remote: r,
+                        listening,
+                        ..
+                    } = s
+                    {
+                        if !listening
+                            && l.port == remote.port
+                            && r.port == local.port
+                            && l.ip() == remote.ip()
+                        {
                             peer_ino = Some(*i);
                         } else if *listening && l.port == remote.port {
                             listen_ino = Some(*i);
@@ -591,32 +793,52 @@ fn peer_blame(cx: &Ctx, res: &Res, wait: &Wait) -> Blame {
                     }
                 }
                 for i in [peer_ino, listen_ino].into_iter().flatten() {
-                    if let Some((p, more)) = pick(holders(&format!("socket:[{i}]"), pid, None), pid) {
+                    if let Some((p, more)) = pick(holders(&format!("socket:[{i}]"), pid, None), pid)
+                    {
                         return process_blame(p, more, "");
                     }
                 }
-                Blame::new("unknown", format!("a local process on port {} that wits cannot see (another user's?)", remote.port))
+                Blame::new(
+                    "unknown",
+                    format!(
+                        "a local process on port {} that wits cannot see (another user's?)",
+                        remote.port
+                    ),
+                )
             }
             Some(Sock::Unix { .. }) => {
-                let peer = if cx.same_ns { net::unix_peer(*ino) } else { None };
+                let peer = if cx.same_ns {
+                    net::unix_peer(*ino)
+                } else {
+                    None
+                };
                 match peer.and_then(|pi| pick(holders(&format!("socket:[{pi}]"), pid, None), pid)) {
                     Some((p, more)) => process_blame(p, more, ""),
                     None => unseen(),
                 }
             }
-            Some(Sock::Udp { remote, .. }) => Blame::new("remote", format!("whoever answers at {remote}")),
+            Some(Sock::Udp { remote, .. }) => {
+                Blame::new("remote", format!("whoever answers at {remote}"))
+            }
             None => unseen(),
         },
         _ => unseen(),
     }
 }
 
-fn lock_blame(cx: &Ctx, res: &Res, wait: &Wait, per_thread: &HashMap<i32, Vec<(Cat, String, f64)>>) -> Blame {
+fn lock_blame(
+    cx: &Ctx,
+    res: &Res,
+    wait: &Wait,
+    per_thread: &HashMap<i32, Vec<(Cat, String, f64)>>,
+) -> Blame {
     let p = cx.p;
     match wait {
         Wait::FileLock { .. } => {
             let locks = sys::parse_locks(p.locks.as_deref().unwrap_or(""));
-            let mine: HashSet<i32> = std::iter::once(p.pid).chain(p.threads.keys().copied()).collect();
+            let mine: HashSet<i32> = std::iter::once(p.pid)
+                .chain(p.threads.keys().copied())
+                .collect();
             // Which inode are we queued on? Prefer the descriptor we saw;
             // otherwise the kernel's own list of blocked waiters.
             let ino = res
@@ -624,7 +846,12 @@ fn lock_blame(cx: &Ctx, res: &Res, wait: &Wait, per_thread: &HashMap<i32, Vec<(C
                 .and_then(|fd| p.fds.get(&fd))
                 .map(|i| i.ino)
                 .filter(|i| *i != 0)
-                .or_else(|| locks.iter().find(|l| l.waiting && mine.contains(&l.pid)).map(|l| l.ino));
+                .or_else(|| {
+                    locks
+                        .iter()
+                        .find(|l| l.waiting && mine.contains(&l.pid))
+                        .map(|l| l.ino)
+                });
             let holder = ino.and_then(|ino| {
                 locks
                     .iter()
@@ -634,14 +861,29 @@ fn lock_blame(cx: &Ctx, res: &Res, wait: &Wait, per_thread: &HashMap<i32, Vec<(C
             });
             match holder {
                 Some(h) if h > 0 && proc::stat(h).is_some() => process_blame(h, 0, "held by "),
-                Some(_) => Blame::new("unknown", "held through a descriptor whose owner is not visible from here".into()),
+                Some(_) => Blame::new(
+                    "unknown",
+                    "held through a descriptor whose owner is not visible from here".into(),
+                ),
                 None => Blame::new("unknown", "the holder is not listed in /proc/locks".into()),
             }
         }
         Wait::Futex { addr, .. } => {
-            let waiters = p.threads.values().filter(|t| t.waits.contains_key(wait)).count();
-            let w = if waiters > 1 { format!("{waiters} threads queue for it; ") } else { String::new() };
-            let owner = p.owners.get(addr).and_then(|m| m.iter().max_by_key(|x| x.1)).map(|x| *x.0);
+            let waiters = p
+                .threads
+                .values()
+                .filter(|t| t.waits.contains_key(wait))
+                .count();
+            let w = if waiters > 1 {
+                format!("{waiters} threads queue for it; ")
+            } else {
+                String::new()
+            };
+            let owner = p
+                .owners
+                .get(addr)
+                .and_then(|m| m.iter().max_by_key(|x| x.1))
+                .map(|x| *x.0);
             match owner {
                 Some(tid) => {
                     let tname = p.threads.get(&tid).map(|t| t.comm.clone()).unwrap_or_default();
@@ -667,7 +909,10 @@ fn lock_blame(cx: &Ctx, res: &Res, wait: &Wait, per_thread: &HashMap<i32, Vec<(C
                 ),
             }
         }
-        _ => Blame::new("unknown", "kernel locks do not record an owner that wits can read".into()),
+        _ => Blame::new(
+            "unknown",
+            "kernel locks do not record an owner that wits can read".into(),
+        ),
     }
 }
 
@@ -695,7 +940,9 @@ fn cpu_wait_answer(
         }
     }
     let (runnable, cpus) = sys::load_now();
-    let allowed = proc::status_field(p.pid, "Cpus_allowed_list").map(|s| proc::parse_cpu_list(&s)).unwrap_or_default();
+    let allowed = proc::status_field(p.pid, "Cpus_allowed_list")
+        .map(|s| proc::parse_cpu_list(&s))
+        .unwrap_or_default();
     let pinned = !allowed.is_empty() && (allowed.len() as u32) < cpus;
     let mut what = if pinned {
         let list = proc::status_field(p.pid, "Cpus_allowed_list").unwrap_or_default();
@@ -707,39 +954,59 @@ fn cpu_wait_answer(
         what.push_str(&format!("; it runs at nice +{}", p.nice));
     }
     let Some(d) = delta else {
-        return (what, Blame::new("unknown", "other runnable processes".into()));
+        return (
+            what,
+            Blame::new("unknown", "other runnable processes".into()),
+        );
     };
     let mine: HashSet<u32> = allowed.iter().copied().collect();
-    let mut hogs = d.cpu.iter().filter(|(pid, _)| *pid != p.pid && *pid != std::process::id() as i32).filter(|(pid, _)| {
-        if !pinned {
-            return true;
-        }
-        // Pinned: only processes running on our CPUs compete with us.
-        proc::stat(*pid).map(|s| mine.contains(&s.processor)).unwrap_or(false)
-    });
+    let mut hogs = d
+        .cpu
+        .iter()
+        .filter(|(pid, _)| *pid != p.pid && *pid != std::process::id() as i32)
+        .filter(|(pid, _)| {
+            if !pinned {
+                return true;
+            }
+            // Pinned: only processes running on our CPUs compete with us.
+            proc::stat(*pid)
+                .map(|s| mine.contains(&s.processor))
+                .unwrap_or(false)
+        });
     let blame = match hogs.next() {
         Some(&(hp, secs)) if secs / d.secs >= 0.1 => {
             let name = proc::label(hp);
             let second = hogs
                 .next()
                 .filter(|(_, s)| s / d.secs >= 0.1)
-                .map(|(p2, s2)| format!("; next pid {p2} ({}) {:.1}", proc::label(*p2), s2 / d.secs))
+                .map(|(p2, s2)| {
+                    format!("; next pid {p2} ({}) {:.1}", proc::label(*p2), s2 / d.secs)
+                })
                 .unwrap_or_default();
             Blame {
                 kind: "process",
                 pid: Some(hp),
                 name: Some(name.clone()),
-                text: format!("pid {hp} ({name}) used {:.1} CPUs in the same window{second}", secs / d.secs),
+                text: format!(
+                    "pid {hp} ({name}) used {:.1} CPUs in the same window{second}",
+                    secs / d.secs
+                ),
             }
         }
-        _ => Blame::new("unknown", "no single process: many small ones are sharing the CPUs".into()),
+        _ => Blame::new(
+            "unknown",
+            "no single process: many small ones are sharing the CPUs".into(),
+        ),
     };
     (what, blame)
 }
 
 fn disk_answer(p: &Profile, res: &Res, delta: Option<&SysDelta>) -> (String, Blame) {
     let Some(d) = delta else {
-        return (res.label.clone(), Blame::new("unknown", "the storage device".into()));
+        return (
+            res.label.clone(),
+            Blame::new("unknown", "the storage device".into()),
+        );
     };
     let dev = res
         .fd
@@ -755,13 +1022,18 @@ fn disk_answer(p: &Profile, res: &Res, delta: Option<&SysDelta>) -> (String, Bla
         None => res.label.clone(),
     };
     let own = d.io.get(&p.pid).copied().unwrap_or((0, 0));
-    let other = d
-        .io
-        .iter()
-        .filter(|(pid, _)| **pid != p.pid && **pid != std::process::id() as i32)
-        .max_by_key(|(_, v)| v.0 + v.1)
-        .map(|(pid, v)| (*pid, *v));
-    let rw = |v: (u64, u64)| format!("read {}, wrote {}", proc::fmt_bytes(v.0), proc::fmt_bytes(v.1));
+    let other =
+        d.io.iter()
+            .filter(|(pid, _)| **pid != p.pid && **pid != std::process::id() as i32)
+            .max_by_key(|(_, v)| v.0 + v.1)
+            .map(|(pid, v)| (*pid, *v));
+    let rw = |v: (u64, u64)| {
+        format!(
+            "read {}, wrote {}",
+            proc::fmt_bytes(v.0),
+            proc::fmt_bytes(v.1)
+        )
+    };
     let blame = match other {
         Some((op, v)) if v.0 + v.1 >= (own.0 + own.1).max(1 << 20) => {
             let name = proc::label(op);
@@ -784,7 +1056,13 @@ fn disk_answer(p: &Profile, res: &Res, delta: Option<&SysDelta>) -> (String, Bla
     (what, blame)
 }
 
-fn memory_answer(p: &Profile, res: &Res, delta: Option<&SysDelta>, hit: Option<(sys::CgLevel, u64)>, majflt: u64) -> (String, Blame) {
+fn memory_answer(
+    p: &Profile,
+    res: &Res,
+    delta: Option<&SysDelta>,
+    hit: Option<(sys::CgLevel, u64)>,
+    majflt: u64,
+) -> (String, Blame) {
     let page = proc::page_size();
     let mut what = res.label.clone();
     if majflt > 0 {
@@ -801,24 +1079,40 @@ fn memory_answer(p: &Profile, res: &Res, delta: Option<&SysDelta>, hit: Option<(
     }
     if let Some((cg, hits)) = hit {
         let lim = sys::mem_limit(&cg)
-            .map(|(cur, lim)| format!(": using {} of a {} limit", proc::fmt_bytes(cur), proc::fmt_bytes(lim)))
+            .map(|(cur, lim)| {
+                format!(
+                    ": using {} of a {} limit",
+                    proc::fmt_bytes(cur),
+                    proc::fmt_bytes(lim)
+                )
+            })
             .unwrap_or_default();
         return (
             what,
             Blame::new(
                 "cgroup",
-                format!("the memory limit of its cgroup {}{lim}; hit {hits} times in the window", cg.name),
+                format!(
+                    "the memory limit of its cgroup {}{lim}; hit {hits} times in the window",
+                    cg.name
+                ),
             ),
         );
     }
     let Some(d) = delta else {
-        return (what, Blame::new("unknown", "memory pressure on the machine".into()));
+        return (
+            what,
+            Blame::new("unknown", "memory pressure on the machine".into()),
+        );
     };
     let total = sys::mem_total_bytes();
     let blame = match d.rss_pages.iter().max_by_key(|x| x.1) {
         Some((&big, &pages)) if big == p.pid => Blame::new(
             "self",
-            format!("itself: it holds {} of {} RAM", proc::fmt_bytes(pages * page), proc::fmt_bytes(total)),
+            format!(
+                "itself: it holds {} of {} RAM",
+                proc::fmt_bytes(pages * page),
+                proc::fmt_bytes(total)
+            ),
         ),
         Some((&big, &pages)) => {
             let name = proc::label(big);
@@ -862,10 +1156,15 @@ enum Key {
 /// Split one thread's wall time into on-CPU, queued, and each observed wait.
 fn split_thread(th: &sample::Th, wall: f64, tck: f64) -> Vec<(Key, f64)> {
     let (mut cpu, mut rq) = match (th.sched0, th.sched1) {
-        (Some(a), Some(b)) => (b.0.saturating_sub(a.0) as f64, b.1.saturating_sub(a.1) as f64),
+        (Some(a), Some(b)) => (
+            b.0.saturating_sub(a.0) as f64,
+            b.1.saturating_sub(a.1) as f64,
+        ),
         _ => {
             // No scheduler statistics: estimate from CPU ticks and samples.
-            let cpu = ((th.utime.1 + th.stime.1).saturating_sub(th.utime.0 + th.stime.0)) as f64 / tck * 1e9;
+            let cpu = ((th.utime.1 + th.stime.1).saturating_sub(th.utime.0 + th.stime.0)) as f64
+                / tck
+                * 1e9;
             let run = wall * th.running as f64 / th.n.max(1) as f64;
             (cpu, (run - cpu).max(0.0))
         }
@@ -887,7 +1186,12 @@ fn split_thread(th: &sample::Th, wall: f64, tck: f64) -> Vec<(Key, f64)> {
         // does not credit to the task (a hypervisor took the CPU away).
         rq += rest;
     } else if rest > 0.0 {
-        out.push((Key::W(Wait::Park { what: "brief sleeps" }), rest));
+        out.push((
+            Key::W(Wait::Park {
+                what: "brief sleeps",
+            }),
+            rest,
+        ));
     }
     out.push((Key::Rq, rq));
     out
@@ -909,8 +1213,16 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
         }
     }
 
-    let cpu_chain = if opts.light { Vec::new() } else { sys::cgroup_chain(pid, "cpu") };
-    let mem_chain = if opts.light { Vec::new() } else { sys::cgroup_chain(pid, "memory") };
+    let cpu_chain = if opts.light {
+        Vec::new()
+    } else {
+        sys::cgroup_chain(pid, "cpu")
+    };
+    let mem_chain = if opts.light {
+        Vec::new()
+    } else {
+        sys::cgroup_chain(pid, "memory")
+    };
     let thr0 = sys::throttled_ns(&cpu_chain);
     let hits0 = sys::mem_limit_hits(&mem_chain);
     let snap0 = (!opts.light).then(SysSnap::take);
@@ -938,7 +1250,10 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
     }
     let window_ns = p.window.as_nanos() as f64;
     let tck = proc::clk_tck() as f64;
-    let swap_in = delta.as_ref().map(|d| d.swapped_in_pages > 0).unwrap_or(false);
+    let swap_in = delta
+        .as_ref()
+        .map(|d| d.swapped_in_pages > 0)
+        .unwrap_or(false);
     let cx = Ctx::new(&p, swap_in, mem_hit.is_some());
 
     // Resolve each distinct wait once.
@@ -950,7 +1265,9 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
             }
         }
     }
-    let park = Wait::Park { what: "brief sleeps" };
+    let park = Wait::Park {
+        what: "brief sleeps",
+    };
     resolved.insert(park.clone(), cx.resolve(&park));
 
     let mut cat_ns: HashMap<Cat, f64> = HashMap::new();
@@ -972,7 +1289,11 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
         let mut parts = split_thread(th, wall, tck);
         // While the cgroup is at its memory limit, the kernel CPU time of a
         // thread seen faulting is the kernel reclaiming memory on its behalf.
-        let faulting = th.waits.keys().find(|w| matches!(w, Wait::Fault | Wait::Mem { .. })).cloned();
+        let faulting = th
+            .waits
+            .keys()
+            .find(|w| matches!(w, Wait::Fault | Wait::Mem { .. }))
+            .cloned();
         if let (Some(w), true) = (faulting, mem_hit.is_some()) {
             let sys_ns = th.stime.1.saturating_sub(th.stime.0) as f64 / tck * 1e9;
             let mut moved = 0.0;
@@ -1024,11 +1345,18 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
             .max_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, w, _)| (w, &resolved[w]))
     };
-    let idle_what = top_wait(Cat::Idle).map(|x| x.1.label.clone()).unwrap_or_else(|| "idle".into());
+    let idle_what = top_wait(Cat::Idle)
+        .map(|x| x.1.label.clone())
+        .unwrap_or_else(|| "idle".into());
 
     let mut breakdown: Vec<(Cat, f64)> = CAUSES
         .iter()
-        .map(|c| (*c, cat_ns.get(c).copied().unwrap_or(0.0) / active_ns.max(1.0)))
+        .map(|c| {
+            (
+                *c,
+                cat_ns.get(c).copied().unwrap_or(0.0) / active_ns.max(1.0),
+            )
+        })
         .collect();
     breakdown.sort_by(|a, b| b.1.total_cmp(&a.1));
 
@@ -1091,21 +1419,35 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
     let (what, blame) = match cause {
         Cat::Cpu => {
             let cpus = cat_ns[&Cat::Cpu] / window_ns;
-            let kern = if ut + st > 0 { st as f64 / (ut + st) as f64 } else { 0.0 };
+            let kern = if ut + st > 0 {
+                st as f64 / (ut + st) as f64
+            } else {
+                0.0
+            };
             let mut what = if kern >= 0.5 {
                 format!("{} of that CPU time is inside the kernel (system calls), the rest its own code", pct(kern))
             } else {
-                format!("running its own code ({} user, {} kernel)", pct(1.0 - kern), pct(kern))
+                format!(
+                    "running its own code ({} user, {} kernel)",
+                    pct(1.0 - kern),
+                    pct(kern)
+                )
             };
             if p.threads.len() > 1 {
                 if let Some((tid, ns)) = hottest {
                     let n = p.threads.get(&tid).map(|t| t.comm.as_str()).unwrap_or("?");
-                    what.push_str(&format!("; hottest thread {tid} ({n}) at {}", pct(ns / window_ns)));
+                    what.push_str(&format!(
+                        "; hottest thread {tid} ({n}) at {}",
+                        pct(ns / window_ns)
+                    ));
                 }
             }
             (
                 what,
-                Blame::new("self", format!("itself: nothing is holding it back; it is using {cpus:.2} CPUs")),
+                Blame::new(
+                    "self",
+                    format!("itself: nothing is holding it back; it is using {cpus:.2} CPUs"),
+                ),
             )
         }
         Cat::CpuWait => cpu_wait_answer(&p, d, throttle, cat_ns[&Cat::CpuWait]),
@@ -1144,7 +1486,10 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
         "high"
     };
     // EV_BLIND waits could not be inspected.
-    if matches!(top_wait(cause), Some((Wait::Events { kind: EV_BLIND, .. }, _))) {
+    if matches!(
+        top_wait(cause),
+        Some((Wait::Events { kind: EV_BLIND, .. }, _))
+    ) {
         ans.confidence = "low";
     }
     Some(ans)
@@ -1203,7 +1548,15 @@ mod tests {
     fn unsampled_sleep_is_idle() {
         let t = th((100, 0), 10, 1, &[]);
         let v = split_thread(&t, 1000.0, 100.0);
-        assert_eq!(get(&v, &Key::W(Wait::Park { what: "brief sleeps" })), 900.0);
+        assert_eq!(
+            get(
+                &v,
+                &Key::W(Wait::Park {
+                    what: "brief sleeps"
+                })
+            ),
+            900.0
+        );
         let sum: f64 = v.iter().map(|x| x.1).sum();
         assert!((sum - 1000.0).abs() < 1e-6);
     }

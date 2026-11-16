@@ -103,7 +103,6 @@ const ARCH: &[(c_long, Kind, &str)] = &[];
 pub fn lookup(nr: i64) -> (Kind, &'static str) {
     for t in [COMMON, ARCH] {
         for &(n, k, name) in t {
-            #[allow(clippy::unnecessary_cast)] // c_long is i32 on 32-bit targets
             if n as i64 == nr {
                 return (k, name.strip_prefix("SYS_").unwrap_or(name));
             }

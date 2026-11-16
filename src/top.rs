@@ -51,7 +51,15 @@ pub fn overview(dur: Duration) -> (Vec<Row>, u64) {
             continue;
         }
         let (r, w) = sched_totals(pid);
-        acc.insert(pid, Acc { name: st.comm, run0: r, wait0: w, ..Acc::default() });
+        acc.insert(
+            pid,
+            Acc {
+                name: st.comm,
+                run0: r,
+                wait0: w,
+                ..Acc::default()
+            },
+        );
     }
     const PASSES: u32 = 5;
     for i in 1..=PASSES {
@@ -62,7 +70,10 @@ pub fn overview(dur: Duration) -> (Vec<Row>, u64) {
         }
         for (pid, a) in acc.iter_mut() {
             for tid in proc::tids(*pid) {
-                if proc::task_stat(*pid, tid).map(|s| s.state == 'D').unwrap_or(false) {
+                if proc::task_stat(*pid, tid)
+                    .map(|s| s.state == 'D')
+                    .unwrap_or(false)
+                {
                     a.d_samples += 1;
                 }
             }
@@ -92,19 +103,37 @@ pub fn overview(dur: Duration) -> (Vec<Row>, u64) {
         })
         .collect();
     scored.sort_by(|a, b| b.1.total_cmp(&a.1).then(b.2.total_cmp(&a.2)));
-    let mut chosen: Vec<(i32, f64)> = scored.iter().filter(|s| s.1 >= 0.01).take(5).map(|s| (s.0, s.1)).collect();
+    let mut chosen: Vec<(i32, f64)> = scored
+        .iter()
+        .filter(|s| s.1 >= 0.01)
+        .take(5)
+        .map(|s| (s.0, s.1))
+        .collect();
     if chosen.len() < 5 {
         // Fill up with the busiest processes so there is always something to see.
-        let mut busy: Vec<&(i32, f64, f64)> =
-            scored.iter().filter(|s| s.1 < 0.01 && s.2 >= 0.01).collect();
+        let mut busy: Vec<&(i32, f64, f64)> = scored
+            .iter()
+            .filter(|s| s.1 < 0.01 && s.2 >= 0.01)
+            .collect();
         busy.sort_by(|a, b| b.2.total_cmp(&a.2));
         chosen.extend(busy.iter().take(5 - chosen.len()).map(|s| (s.0, s.1)));
     }
-    let left = dur.saturating_sub(start.elapsed()).max(Duration::from_millis(300));
+    let left = dur
+        .saturating_sub(start.elapsed())
+        .max(Duration::from_millis(300));
     let handles: Vec<_> = chosen
         .iter()
         .map(|&(pid, _)| {
-            std::thread::spawn(move || explain::analyze(pid, Opts { dur: left, follow: false, light: false }))
+            std::thread::spawn(move || {
+                explain::analyze(
+                    pid,
+                    Opts {
+                        dur: left,
+                        follow: false,
+                        light: false,
+                    },
+                )
+            })
         })
         .collect();
     let mut rows: Vec<Row> = chosen
@@ -115,12 +144,22 @@ pub fn overview(dur: Duration) -> (Vec<Row>, u64) {
             // Prefer the careful measurement: non-idle time not spent on CPU.
             let waiting = match &answer {
                 Some(a) => {
-                    let cpu = a.breakdown.iter().find(|b| b.0 == explain::Cat::Cpu).map(|b| b.1).unwrap_or(0.0);
+                    let cpu = a
+                        .breakdown
+                        .iter()
+                        .find(|b| b.0 == explain::Cat::Cpu)
+                        .map(|b| b.1)
+                        .unwrap_or(0.0);
                     a.active * (1.0 - cpu)
                 }
                 None => rough,
             };
-            Row { pid, name: acc.get(&pid).map(|a| a.name.clone()).unwrap_or_default(), waiting, answer }
+            Row {
+                pid,
+                name: acc.get(&pid).map(|a| a.name.clone()).unwrap_or_default(),
+                waiting,
+                answer,
+            }
         })
         .collect();
     rows.sort_by(|a, b| b.waiting.total_cmp(&a.waiting));

@@ -22,7 +22,12 @@ impl Addr {
                 None => IpAddr::V6(a),
             }
         } else {
-            IpAddr::V4(Ipv4Addr::new(self.raw[0], self.raw[1], self.raw[2], self.raw[3]))
+            IpAddr::V4(Ipv4Addr::new(
+                self.raw[0],
+                self.raw[1],
+                self.raw[2],
+                self.raw[3],
+            ))
         }
     }
 
@@ -42,9 +47,22 @@ impl std::fmt::Display for Addr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Sock {
-    Tcp { local: Addr, remote: Addr, listening: bool, connecting: bool },
-    Udp { local: Addr, remote: Addr },
-    Unix { path: String, stream: bool, listening: bool, connected: bool },
+    Tcp {
+        local: Addr,
+        remote: Addr,
+        listening: bool,
+        connecting: bool,
+    },
+    Udp {
+        local: Addr,
+        remote: Addr,
+    },
+    Unix {
+        path: String,
+        stream: bool,
+        listening: bool,
+        connected: bool,
+    },
 }
 
 /// "0100007F:1F90" or the 32-hex-digit IPv6 form. Each 8-digit group is a
@@ -60,7 +78,11 @@ pub fn parse_addr(s: &str) -> Option<Addr> {
         let w = u32::from_str_radix(std::str::from_utf8(chunk).ok()?, 16).ok()?;
         raw[i * 4..i * 4 + 4].copy_from_slice(&w.to_ne_bytes());
     }
-    Some(Addr { raw, v6: a.len() == 32, port })
+    Some(Addr {
+        raw,
+        v6: a.len() == 32,
+        port,
+    })
 }
 
 fn parse_inet(table: &str, tcp: bool, out: &mut HashMap<u64, Sock>) {
@@ -69,9 +91,12 @@ fn parse_inet(table: &str, tcp: bool, out: &mut HashMap<u64, Sock>) {
         if f.len() < 10 {
             continue;
         }
-        let (Some(local), Some(remote), Ok(st), Ok(ino)) =
-            (parse_addr(f[1]), parse_addr(f[2]), u8::from_str_radix(f[3], 16), f[9].parse::<u64>())
-        else {
+        let (Some(local), Some(remote), Ok(st), Ok(ino)) = (
+            parse_addr(f[1]),
+            parse_addr(f[2]),
+            u8::from_str_radix(f[3], 16),
+            f[9].parse::<u64>(),
+        ) else {
             continue;
         };
         if ino == 0 {
@@ -80,7 +105,12 @@ fn parse_inet(table: &str, tcp: bool, out: &mut HashMap<u64, Sock>) {
         out.insert(
             ino,
             if tcp {
-                Sock::Tcp { local, remote, listening: st == 0x0a, connecting: st == 0x02 }
+                Sock::Tcp {
+                    local,
+                    remote,
+                    listening: st == 0x0a,
+                    connecting: st == 0x02,
+                }
             } else {
                 Sock::Udp { local, remote }
             },
@@ -168,11 +198,18 @@ const NLMSG_DONE: u16 = 3;
 
 fn diag(req_body: &[u8]) -> Option<Vec<u8>> {
     unsafe {
-        let fd = libc::socket(libc::AF_NETLINK, libc::SOCK_RAW | libc::SOCK_CLOEXEC, NETLINK_SOCK_DIAG);
+        let fd = libc::socket(
+            libc::AF_NETLINK,
+            libc::SOCK_RAW | libc::SOCK_CLOEXEC,
+            NETLINK_SOCK_DIAG,
+        );
         if fd < 0 {
             return None;
         }
-        let tv = libc::timeval { tv_sec: 0, tv_usec: 200_000 };
+        let tv = libc::timeval {
+            tv_sec: 0,
+            tv_usec: 200_000,
+        };
         libc::setsockopt(
             fd,
             libc::SOL_SOCKET,
@@ -245,7 +282,11 @@ fn u32_at(b: &[u8], off: usize) -> Option<u32> {
 /// namespace.
 pub fn tcp_info(local: &Addr, remote: &Addr) -> Option<TcpInfo> {
     let mut r = Vec::with_capacity(56);
-    r.push(if local.v6 { libc::AF_INET6 } else { libc::AF_INET } as u8);
+    r.push(if local.v6 {
+        libc::AF_INET6
+    } else {
+        libc::AF_INET
+    } as u8);
     r.push(libc::IPPROTO_TCP as u8);
     r.push(1 << 1); // INET_DIAG_INFO
     r.push(0);
@@ -311,9 +352,20 @@ mod tests {
         let t = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 4455 1 0000000000000000 100 0 0 10 0\n   1: 0100007F:C350 0100007F:1F90 01 00000000:00000000 00:00000000 00000000     0        0 4460 1 0000000000000000 20 4 30 10 -1\n";
         let mut m = HashMap::new();
         parse_inet(t, true, &mut m);
-        assert!(matches!(m.get(&4455), Some(Sock::Tcp { listening: true, .. })));
+        assert!(matches!(
+            m.get(&4455),
+            Some(Sock::Tcp {
+                listening: true,
+                ..
+            })
+        ));
         match m.get(&4460) {
-            Some(Sock::Tcp { remote, listening: false, connecting: false, .. }) => assert_eq!(remote.port, 8080),
+            Some(Sock::Tcp {
+                remote,
+                listening: false,
+                connecting: false,
+                ..
+            }) => assert_eq!(remote.port, 8080),
             o => panic!("{o:?}"),
         }
     }
@@ -325,9 +377,20 @@ mod tests {
         parse_unix(t, &mut m);
         assert_eq!(
             m.get(&777),
-            Some(&Sock::Unix { path: "/run/x.sock".into(), stream: true, listening: true, connected: false })
+            Some(&Sock::Unix {
+                path: "/run/x.sock".into(),
+                stream: true,
+                listening: true,
+                connected: false
+            })
         );
-        assert!(matches!(m.get(&778), Some(Sock::Unix { connected: true, .. })));
+        assert!(matches!(
+            m.get(&778),
+            Some(Sock::Unix {
+                connected: true,
+                ..
+            })
+        ));
     }
 
     #[test]

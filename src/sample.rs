@@ -18,67 +18,155 @@ pub const EV_BLIND: u8 = 3;
 /// What a blocked thread was waiting on at one sample.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Wait {
-    Disk { sys: &'static str, fd: i32 },
+    Disk {
+        sys: &'static str,
+        fd: i32,
+    },
     /// Uninterruptible wait outside a system call: a page being read in.
     Fault,
-    Mem { why: String },
-    Futex { addr: u64, lockish: bool, pi: bool },
-    FileLock { fd: i32 },
-    KLock { why: String },
+    Mem {
+        why: String,
+    },
+    Futex {
+        addr: u64,
+        lockish: bool,
+        pi: bool,
+    },
+    FileLock {
+        fd: i32,
+    },
+    KLock {
+        why: String,
+    },
     /// Blocking read or write on a descriptor.
-    Io { fd: i32, write: bool, sys: &'static str },
-    Connect { fd: i32 },
+    Io {
+        fd: i32,
+        write: bool,
+        sys: &'static str,
+    },
+    Connect {
+        fd: i32,
+    },
     /// Blocking open (a FIFO with no partner yet).
-    Open { ptr: u64 },
-    Events { kind: u8, a: u64, n: u64 },
-    Ipc { sys: &'static str },
+    Open {
+        ptr: u64,
+    },
+    Events {
+        kind: u8,
+        a: u64,
+        n: u64,
+    },
+    Ipc {
+        sys: &'static str,
+    },
     Child,
     Sleep,
-    Accept { fd: i32 },
+    Accept {
+        fd: i32,
+    },
     Stopped,
-    Park { what: &'static str },
+    Park {
+        what: &'static str,
+    },
     /// Known only from the kernel wait symbol: "pipe" or "socket".
-    Blind { what: &'static str },
-    Unknown { why: String, d: bool },
+    Blind {
+        what: &'static str,
+    },
+    Unknown {
+        why: String,
+        d: bool,
+    },
 }
 
 fn has(w: &str, pats: &[&str]) -> bool {
     pats.iter().any(|p| w.contains(p))
 }
 
-const W_MEM: &[&str] = &["mem_cgroup", "reclaim", "swap", "throttle_direct", "compact", "oom_"];
+const W_MEM: &[&str] = &[
+    "mem_cgroup",
+    "reclaim",
+    "swap",
+    "throttle_direct",
+    "compact",
+    "oom_",
+];
 const W_DISK: &[&str] = &[
-    "io_schedule", "folio_wait", "wait_on_page", "bit_wait_io", "blk_", "bio_", "jbd2", "ext4",
-    "xfs_", "btrfs", "wbt_", "rq_qos", "balance_dirty", "writeback", "wait_on_buffer",
-    "inode_wait", "nfs", "fuse", "request_wait_answer", "submit_bio",
+    "io_schedule",
+    "folio_wait",
+    "wait_on_page",
+    "bit_wait_io",
+    "blk_",
+    "bio_",
+    "jbd2",
+    "ext4",
+    "xfs_",
+    "btrfs",
+    "wbt_",
+    "rq_qos",
+    "balance_dirty",
+    "writeback",
+    "wait_on_buffer",
+    "inode_wait",
+    "nfs",
+    "fuse",
+    "request_wait_answer",
+    "submit_bio",
 ];
 const W_KLOCK: &[&str] = &["rwsem", "mutex", "down_", "percpu_rwsem"];
-const W_FLOCK: &[&str] = &["flock", "locks_lock", "lock_file", "posix_lock", "fcntl_setlk"];
+const W_FLOCK: &[&str] = &[
+    "flock",
+    "locks_lock",
+    "lock_file",
+    "posix_lock",
+    "fcntl_setlk",
+];
 const W_SLEEP: &[&str] = &["nanosleep", "nsleep"];
-const W_EVENTS: &[&str] = &["ep_poll", "epoll", "do_sys_poll", "poll_schedule", "do_select", "select"];
+const W_EVENTS: &[&str] = &[
+    "ep_poll",
+    "epoll",
+    "do_sys_poll",
+    "poll_schedule",
+    "do_select",
+    "select",
+];
 const W_SOCK: &[&str] = &["sk_wait", "tcp_", "unix_", "skb_", "sock_", "inet_"];
 
 fn futex_wait(args: &[u64; 6]) -> Wait {
     let cmd = args[1] & 0x7f;
     match cmd {
         // FUTEX_LOCK_PI, FUTEX_LOCK_PI2
-        6 | 13 => Wait::Futex { addr: args[0], lockish: true, pi: true },
+        6 | 13 => Wait::Futex {
+            addr: args[0],
+            lockish: true,
+            pi: true,
+        },
         // FUTEX_WAIT, FUTEX_WAIT_BITSET. glibc, Rust std and the Go runtime
         // all park contended-mutex waiters with an expected value of 2.
-        0 | 9 => Wait::Futex { addr: args[0], lockish: args[2] as u32 == 2, pi: false },
+        0 | 9 => Wait::Futex {
+            addr: args[0],
+            lockish: args[2] as u32 == 2,
+            pi: false,
+        },
         _ => Wait::Park { what: "futex" },
     }
 }
 
 fn by_wchan(w: Option<&str>, d: bool) -> Wait {
     let Some(w) = w else {
-        return Wait::Unknown { why: String::new(), d };
+        return Wait::Unknown {
+            why: String::new(),
+            d,
+        };
     };
     if has(w, W_MEM) {
         Wait::Mem { why: w.to_string() }
     } else if w.contains("futex") {
         let pi = w.contains("lock_pi");
-        Wait::Futex { addr: 0, lockish: pi, pi }
+        Wait::Futex {
+            addr: 0,
+            lockish: pi,
+            pi,
+        }
     } else if has(w, W_FLOCK) {
         Wait::FileLock { fd: -1 }
     } else if has(w, W_DISK) {
@@ -90,7 +178,11 @@ fn by_wchan(w: Option<&str>, d: bool) -> Wait {
     } else if has(w, W_SLEEP) {
         Wait::Sleep
     } else if has(w, W_EVENTS) {
-        Wait::Events { kind: EV_BLIND, a: 0, n: 0 }
+        Wait::Events {
+            kind: EV_BLIND,
+            a: 0,
+            n: 0,
+        }
     } else if w.contains("accept") {
         Wait::Accept { fd: -1 }
     } else if w.contains("partner") || w.contains("fifo_open") {
@@ -98,13 +190,18 @@ fn by_wchan(w: Option<&str>, d: bool) -> Wait {
     } else if w.contains("pipe") {
         Wait::Blind { what: "pipe" }
     } else if w.contains("tty") {
-        Wait::Park { what: "terminal input" }
+        Wait::Park {
+            what: "terminal input",
+        }
     } else if has(w, W_SOCK) {
         Wait::Blind { what: "socket" }
     } else if w.contains("sigsuspend") || w.contains("sigtimedwait") || w.contains("pause") {
         Wait::Park { what: "a signal" }
     } else {
-        Wait::Unknown { why: w.to_string(), d }
+        Wait::Unknown {
+            why: w.to_string(),
+            d,
+        }
     }
 }
 
@@ -141,8 +238,16 @@ pub fn classify(state: char, sc: Option<Syscall>, wchan: Option<&str>) -> Option
     let fd = args[0] as i32;
     Some(match kind {
         Kind::Read | Kind::Write if d => Wait::Disk { sys: name, fd },
-        Kind::Read => Wait::Io { fd, write: false, sys: name },
-        Kind::Write => Wait::Io { fd, write: true, sys: name },
+        Kind::Read => Wait::Io {
+            fd,
+            write: false,
+            sys: name,
+        },
+        Kind::Write => Wait::Io {
+            fd,
+            write: true,
+            sys: name,
+        },
         Kind::Sync => Wait::Disk { sys: name, fd },
         Kind::SyncAll | Kind::FileMeta => Wait::Disk { sys: name, fd: -1 },
         Kind::Open0 | Kind::Open1 if d => Wait::Disk { sys: name, fd: -1 },
@@ -151,14 +256,22 @@ pub fn classify(state: char, sc: Option<Syscall>, wchan: Option<&str>) -> Option
         Kind::Connect => Wait::Connect { fd },
         Kind::Accept => Wait::Accept { fd },
         Kind::Poll if args[1] == 0 => Wait::Sleep,
-        Kind::Poll => Wait::Events { kind: EV_POLL, a: args[0], n: args[1] },
+        Kind::Poll => Wait::Events {
+            kind: EV_POLL,
+            a: args[0],
+            n: args[1],
+        },
         Kind::Select if args[0] == 0 => Wait::Sleep,
         Kind::Select => Wait::Events {
             kind: EV_SELECT,
             a: if args[1] != 0 { args[1] } else { args[2] },
             n: args[0],
         },
-        Kind::Epoll => Wait::Events { kind: EV_EPOLL, a: args[0], n: 0 },
+        Kind::Epoll => Wait::Events {
+            kind: EV_EPOLL,
+            a: args[0],
+            n: 0,
+        },
         Kind::Futex => futex_wait(&args),
         Kind::Flock => Wait::FileLock { fd },
         // F_SETLKW, F_OFD_SETLKW
@@ -167,10 +280,16 @@ pub fn classify(state: char, sc: Option<Syscall>, wchan: Option<&str>) -> Option
         Kind::Wait | Kind::Fork => Wait::Child,
         Kind::Sleep => Wait::Sleep,
         Kind::SigWait => Wait::Park { what: "a signal" },
-        Kind::Uring => Wait::Events { kind: EV_BLIND, a: 0, n: 0 },
+        Kind::Uring => Wait::Events {
+            kind: EV_BLIND,
+            a: 0,
+            n: 0,
+        },
         Kind::Ipc => Wait::Ipc { sys: name },
         Kind::Other => match by_wchan(wchan, d) {
-            Wait::Unknown { why, d } if !d && why.is_empty() => Wait::Park { what: "a system call" },
+            Wait::Unknown { why, d } if !d && why.is_empty() => Wait::Park {
+                what: "a system call",
+            },
             w => w,
         },
     })
@@ -214,7 +333,10 @@ pub fn fd_info(pid: i32, fd: i32) -> Option<FdInfo> {
         if ft.is_fifo() {
             FdKind::Fifo
         } else if ft.is_char_device() {
-            if link.starts_with("/dev/pts/") || link.starts_with("/dev/tty") || link == "/dev/console" {
+            if link.starts_with("/dev/pts/")
+                || link.starts_with("/dev/tty")
+                || link == "/dev/console"
+            {
                 FdKind::Tty
             } else {
                 FdKind::CharDev
@@ -229,7 +351,12 @@ pub fn fd_info(pid: i32, fd: i32) -> Option<FdInfo> {
     } else {
         FdKind::Other
     };
-    Some(FdInfo { link, kind, dev, ino })
+    Some(FdInfo {
+        link,
+        kind,
+        dev,
+        ino,
+    })
 }
 
 #[derive(Debug, Default)]
@@ -349,9 +476,10 @@ impl Profile {
     /// lock owners while the process is still in that state.
     fn note(&mut self, w: &Wait, tid: i32, tids: &[i32]) {
         match *w {
-            Wait::Disk { fd, .. } | Wait::Io { fd, .. } | Wait::Connect { fd } | Wait::Accept { fd } => {
-                self.need_fd(fd)
-            }
+            Wait::Disk { fd, .. }
+            | Wait::Io { fd, .. }
+            | Wait::Connect { fd }
+            | Wait::Accept { fd } => self.need_fd(fd),
             Wait::FileLock { fd } => {
                 self.need_fd(fd);
                 if self.locks.is_none() {
@@ -373,11 +501,16 @@ impl Profile {
                 if ptr != 0 && !self.strs.contains_key(&ptr) {
                     if let Some(b) = self.mem_read(ptr, 256) {
                         let end = b.iter().position(|&c| c == 0).unwrap_or(b.len());
-                        self.strs.insert(ptr, String::from_utf8_lossy(&b[..end]).into_owned());
+                        self.strs
+                            .insert(ptr, String::from_utf8_lossy(&b[..end]).into_owned());
                     }
                 }
             }
-            Wait::Futex { addr, lockish: true, pi } => {
+            Wait::Futex {
+                addr,
+                lockish: true,
+                pi,
+            } => {
                 let owner = if pi {
                     self.mem_read(addr, 4).map(|b| u32_at(&b, 0) & 0x3fff_ffff)
                 } else {
@@ -525,7 +658,10 @@ mod tests {
     use super::*;
 
     fn sc(nr: libc::c_long, args: [u64; 6]) -> Option<Syscall> {
-        Some(Syscall::In { nr: nr as i64, args })
+        Some(Syscall::In {
+            nr: nr as i64,
+            args,
+        })
     }
 
     #[test]
@@ -545,7 +681,11 @@ mod tests {
         let a = [5, 0, 0, 0, 0, 0];
         assert_eq!(
             classify('S', sc(libc::SYS_read, a), Some("anon_pipe_read")),
-            Some(Wait::Io { fd: 5, write: false, sys: "read" })
+            Some(Wait::Io {
+                fd: 5,
+                write: false,
+                sys: "read"
+            })
         );
         assert_eq!(
             classify('D', sc(libc::SYS_read, a), Some("folio_wait_bit_common")),
@@ -557,7 +697,10 @@ mod tests {
     fn fsync_is_disk() {
         assert_eq!(
             classify('D', sc(libc::SYS_fsync, [9, 0, 0, 0, 0, 0]), None),
-            Some(Wait::Disk { sys: "fsync", fd: 9 })
+            Some(Wait::Disk {
+                sys: "fsync",
+                fd: 9
+            })
         );
     }
 
@@ -566,17 +709,29 @@ mod tests {
         // FUTEX_WAIT_PRIVATE, expected value 2: a contended mutex
         assert_eq!(
             classify('S', sc(libc::SYS_futex, [0x1000, 128, 2, 0, 0, 0]), None),
-            Some(Wait::Futex { addr: 0x1000, lockish: true, pi: false })
+            Some(Wait::Futex {
+                addr: 0x1000,
+                lockish: true,
+                pi: false
+            })
         );
         // FUTEX_WAIT_BITSET_PRIVATE on a condition variable
         assert_eq!(
             classify('S', sc(libc::SYS_futex, [0x1000, 137, 0, 0, 0, 0]), None),
-            Some(Wait::Futex { addr: 0x1000, lockish: false, pi: false })
+            Some(Wait::Futex {
+                addr: 0x1000,
+                lockish: false,
+                pi: false
+            })
         );
         // FUTEX_LOCK_PI
         assert_eq!(
             classify('S', sc(libc::SYS_futex, [0x1000, 6, 0, 0, 0, 0]), None),
-            Some(Wait::Futex { addr: 0x1000, lockish: true, pi: true })
+            Some(Wait::Futex {
+                addr: 0x1000,
+                lockish: true,
+                pi: true
+            })
         );
     }
 
@@ -590,36 +745,81 @@ mod tests {
             classify('S', sc(libc::SYS_fcntl, [4, 7, 0, 0, 0, 0]), None),
             Some(Wait::FileLock { fd: 4 })
         );
-        assert_eq!(classify('S', None, Some("flock_lock_inode_wait")), Some(Wait::FileLock { fd: -1 }));
+        assert_eq!(
+            classify('S', None, Some("flock_lock_inode_wait")),
+            Some(Wait::FileLock { fd: -1 })
+        );
     }
 
     #[test]
     fn page_fault_and_memory() {
-        assert_eq!(classify('D', Some(Syscall::Outside), Some("folio_wait_bit_common")), Some(Wait::Fault));
+        assert_eq!(
+            classify('D', Some(Syscall::Outside), Some("folio_wait_bit_common")),
+            Some(Wait::Fault)
+        );
         assert!(matches!(
-            classify('D', sc(libc::SYS_read, [3, 0, 0, 0, 0, 0]), Some("mem_cgroup_handle_over_high")),
+            classify(
+                'D',
+                sc(libc::SYS_read, [3, 0, 0, 0, 0, 0]),
+                Some("mem_cgroup_handle_over_high")
+            ),
             Some(Wait::Mem { .. })
         ));
     }
 
     #[test]
     fn without_syscall_falls_back_to_wait_symbol() {
-        assert_eq!(classify('S', None, Some("anon_pipe_read")), Some(Wait::Blind { what: "pipe" }));
-        assert_eq!(classify('S', None, Some("hrtimer_nanosleep")), Some(Wait::Sleep));
+        assert_eq!(
+            classify('S', None, Some("anon_pipe_read")),
+            Some(Wait::Blind { what: "pipe" })
+        );
+        assert_eq!(
+            classify('S', None, Some("hrtimer_nanosleep")),
+            Some(Wait::Sleep)
+        );
         assert_eq!(classify('S', None, Some("do_wait")), Some(Wait::Child));
-        assert_eq!(classify('S', None, Some("ep_poll")), Some(Wait::Events { kind: EV_BLIND, a: 0, n: 0 }));
-        assert_eq!(classify('D', None, Some("io_schedule")), Some(Wait::Disk { sys: "", fd: -1 }));
-        assert_eq!(classify('S', None, None), Some(Wait::Unknown { why: String::new(), d: false }));
+        assert_eq!(
+            classify('S', None, Some("ep_poll")),
+            Some(Wait::Events {
+                kind: EV_BLIND,
+                a: 0,
+                n: 0
+            })
+        );
+        assert_eq!(
+            classify('D', None, Some("io_schedule")),
+            Some(Wait::Disk { sys: "", fd: -1 })
+        );
+        assert_eq!(
+            classify('S', None, None),
+            Some(Wait::Unknown {
+                why: String::new(),
+                d: false
+            })
+        );
     }
 
     #[test]
     fn sleeps_and_children() {
-        assert_eq!(classify('S', sc(libc::SYS_clock_nanosleep, [0; 6]), None), Some(Wait::Sleep));
-        assert_eq!(classify('S', sc(libc::SYS_wait4, [0; 6]), None), Some(Wait::Child));
-        assert_eq!(classify('S', sc(libc::SYS_ppoll, [0x10, 0, 0, 0, 0, 0]), None), Some(Wait::Sleep));
+        assert_eq!(
+            classify('S', sc(libc::SYS_clock_nanosleep, [0; 6]), None),
+            Some(Wait::Sleep)
+        );
+        assert_eq!(
+            classify('S', sc(libc::SYS_wait4, [0; 6]), None),
+            Some(Wait::Child)
+        );
+        assert_eq!(
+            classify('S', sc(libc::SYS_ppoll, [0x10, 0, 0, 0, 0, 0]), None),
+            Some(Wait::Sleep)
+        );
         assert_eq!(
             classify('S', sc(libc::SYS_ppoll, [0x10, 2, 0, 0, 0, 0]), None),
-            Some(Wait::Events { kind: EV_POLL, a: 0x10, n: 2 })
+            Some(Wait::Events {
+                kind: EV_POLL,
+                a: 0x10,
+                n: 2
+            })
         );
     }
 }

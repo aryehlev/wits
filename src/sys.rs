@@ -152,8 +152,13 @@ impl SysDelta {
 pub fn mem_total_bytes() -> u64 {
     proc::slurp("/proc/meminfo")
         .and_then(|s| {
-            s.lines()
-                .find_map(|l| l.strip_prefix("MemTotal:")?.split_ascii_whitespace().next()?.parse::<u64>().ok())
+            s.lines().find_map(|l| {
+                l.strip_prefix("MemTotal:")?
+                    .split_ascii_whitespace()
+                    .next()?
+                    .parse::<u64>()
+                    .ok()
+            })
         })
         .unwrap_or(0)
         * 1024
@@ -162,10 +167,20 @@ pub fn mem_total_bytes() -> u64 {
 /// (tasks runnable right now, online CPUs)
 pub fn load_now() -> (u32, u32) {
     let running = proc::slurp("/proc/loadavg")
-        .and_then(|s| s.split_ascii_whitespace().nth(3)?.split('/').next()?.parse::<u32>().ok())
+        .and_then(|s| {
+            s.split_ascii_whitespace()
+                .nth(3)?
+                .split('/')
+                .next()?
+                .parse::<u32>()
+                .ok()
+        })
         .unwrap_or(0);
     let cpus = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
-    (running.saturating_sub(1), if cpus > 0 { cpus as u32 } else { 1 })
+    (
+        running.saturating_sub(1),
+        if cpus > 0 { cpus as u32 } else { 1 },
+    )
 }
 
 // ---- cgroups -------------------------------------------------------------
@@ -211,7 +226,10 @@ pub fn cgroup_chain(pid: i32, controller: &str) -> Vec<CgLevel> {
         }
         if rf[0] == "cgroup2" && v2_mount.is_none() {
             v2_mount = Some((lf[4].to_string(), lf[3].to_string()));
-        } else if rf[0] == "cgroup" && rf[2].split(',').any(|o| o == controller) && v1_mount.is_none() {
+        } else if rf[0] == "cgroup"
+            && rf[2].split(',').any(|o| o == controller)
+            && v1_mount.is_none()
+        {
             v1_mount = Some((lf[4].to_string(), lf[3].to_string()));
         }
     }
@@ -222,14 +240,20 @@ pub fn cgroup_chain(pid: i32, controller: &str) -> Vec<CgLevel> {
     };
     // The mount may expose only a subtree (cgroup namespaces, bind mounts).
     let rel = if root != "/" {
-        path.strip_prefix(root.as_str()).unwrap_or(&path).to_string()
+        path.strip_prefix(root.as_str())
+            .unwrap_or(&path)
+            .to_string()
     } else {
         path
     };
     let mut out = Vec::new();
     let mut cur = rel.trim_end_matches('/').to_string();
     while !cur.is_empty() && cur != "/" {
-        out.push(CgLevel { name: cur.clone(), dir: format!("{mount}{cur}"), v2 });
+        out.push(CgLevel {
+            name: cur.clone(),
+            dir: format!("{mount}{cur}"),
+            v2,
+        });
         match cur.rfind('/') {
             Some(i) => cur.truncate(i),
             None => break,
@@ -267,8 +291,14 @@ pub fn cpu_limit(c: &CgLevel) -> Option<f64> {
         let p: f64 = it.next()?.parse().ok()?;
         Some(q / p)
     } else {
-        let q: f64 = proc::slurp(&format!("{}/cpu.cfs_quota_us", c.dir))?.trim().parse().ok()?;
-        let p: f64 = proc::slurp(&format!("{}/cpu.cfs_period_us", c.dir))?.trim().parse().ok()?;
+        let q: f64 = proc::slurp(&format!("{}/cpu.cfs_quota_us", c.dir))?
+            .trim()
+            .parse()
+            .ok()?;
+        let p: f64 = proc::slurp(&format!("{}/cpu.cfs_period_us", c.dir))?
+            .trim()
+            .parse()
+            .ok()?;
         if q <= 0.0 || p <= 0.0 {
             None
         } else {
@@ -296,9 +326,17 @@ pub fn mem_limit_hits(chain: &[CgLevel]) -> Vec<u64> {
 
 /// (current usage, limit) in bytes for a memory cgroup, if it has a limit.
 pub fn mem_limit(c: &CgLevel) -> Option<(u64, u64)> {
-    let rd = |f: &str| -> Option<u64> { proc::slurp(&format!("{}/{}", c.dir, f))?.trim().parse().ok() };
+    let rd = |f: &str| -> Option<u64> {
+        proc::slurp(&format!("{}/{}", c.dir, f))?
+            .trim()
+            .parse()
+            .ok()
+    };
     if c.v2 {
-        let lim = [rd("memory.high"), rd("memory.max")].into_iter().flatten().min()?;
+        let lim = [rd("memory.high"), rd("memory.max")]
+            .into_iter()
+            .flatten()
+            .min()?;
         Some((rd("memory.current")?, lim))
     } else {
         let lim = rd("memory.limit_in_bytes")?;
@@ -348,7 +386,14 @@ pub fn parse_locks(s: &str) -> Vec<LockLine> {
         ) else {
             continue;
         };
-        out.push(LockLine { waiting, kind: f[0].to_string(), pid, major, minor, ino });
+        out.push(LockLine {
+            waiting,
+            kind: f[0].to_string(),
+            pid,
+            major,
+            minor,
+            ino,
+        });
     }
     out
 }
@@ -364,7 +409,14 @@ mod tests {
         assert_eq!(v.len(), 3);
         assert_eq!(
             v[0],
-            LockLine { waiting: false, kind: "FLOCK".into(), pid: 174, major: 0xfe, minor: 0, ino: 679940 }
+            LockLine {
+                waiting: false,
+                kind: "FLOCK".into(),
+                pid: 174,
+                major: 0xfe,
+                minor: 0,
+                ino: 679940
+            }
         );
         assert!(v[1].waiting);
         assert_eq!(v[1].pid, 200);
@@ -381,7 +433,10 @@ mod tests {
 
     #[test]
     fn io() {
-        assert_eq!(parse_io("rchar: 1\nread_bytes: 4096\nwrite_bytes: 8192\n"), Some((4096, 8192)));
+        assert_eq!(
+            parse_io("rchar: 1\nread_bytes: 4096\nwrite_bytes: 8192\n"),
+            Some((4096, 8192))
+        );
         assert_eq!(parse_io(""), None);
     }
 }

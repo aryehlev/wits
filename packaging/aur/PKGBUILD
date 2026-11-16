@@ -1,0 +1,21 @@
+# Template: the release workflow fills in the @...@ fields and attaches the
+# result to the GitHub release as PKGBUILD. Push that file (plus the output of
+# `makepkg --printsrcinfo > .SRCINFO`) to the AUR repository wits-bin.
+pkgname=wits-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc="Explain why a process is slow on your Linux system. No root, no eBPF."
+arch=('x86_64' 'aarch64')
+url="https://github.com/aryehlev/wits"
+license=('MIT')
+provides=('wits')
+conflicts=('wits')
+source_x86_64=("wits-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/wits-x86_64-unknown-linux-musl.tar.gz")
+source_aarch64=("wits-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/wits-aarch64-unknown-linux-musl.tar.gz")
+sha256sums_x86_64=('@SHA_X86_64@')
+sha256sums_aarch64=('@SHA_AARCH64@')
+
+package() {
+  install -Dm755 wits "$pkgdir/usr/bin/wits"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

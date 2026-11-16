@@ -1,5 +1,8 @@
 //! wits: explain why a process is slow on your Linux system.
 
+// libc::c_long is i64 on the targets we ship and i32 on 32-bit ones.
+#![allow(clippy::unnecessary_cast)]
+
 #[cfg(not(target_os = "linux"))]
 compile_error!("wits only works on Linux: it reads /proc.");
 
@@ -85,7 +88,10 @@ fn resolve(name: &str) -> (i32, usize) {
                 .zip(before)
                 .map(|(&p, b)| {
                     let d_state = proc::stat(p).map(|s| s.state == 'D').unwrap_or(false);
-                    (score(p).saturating_sub(b) + if d_state { 150_000_000 } else { 0 }, p)
+                    (
+                        score(p).saturating_sub(b) + if d_state { 150_000_000 } else { 0 },
+                        p,
+                    )
                 })
                 // Most active wins; among equals, the oldest (lowest pid).
                 .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)))
@@ -119,9 +125,13 @@ fn main() {
                     .next()
                     .and_then(|v| v.parse().ok())
                     .filter(|v: &f64| *v >= 0.1 && *v <= 3600.0)
-                    .unwrap_or_else(|| die("--time needs a number of seconds between 0.1 and 3600", 2));
+                    .unwrap_or_else(|| {
+                        die("--time needs a number of seconds between 0.1 and 3600", 2)
+                    });
             }
-            s if s.starts_with('-') && s.len() > 1 => die(&format!("unknown option '{s}' (try --help)"), 2),
+            s if s.starts_with('-') && s.len() > 1 => {
+                die(&format!("unknown option '{s}' (try --help)"), 2)
+            }
             _ if target.is_some() => die("give one pid or name (try --help)", 2),
             _ => target = Some(a),
         }
@@ -150,11 +160,20 @@ fn main() {
         }
         _ => {}
     }
-    let Some(mut ans) = explain::analyze(pid, explain::Opts { dur, follow, light: false }) else {
+    let Some(mut ans) = explain::analyze(
+        pid,
+        explain::Opts {
+            dur,
+            follow,
+            light: false,
+        },
+    ) else {
         die(&format!("pid {pid} exited before wits could look at it"), 1);
     };
     if others > 0 {
-        ans.notes.push(format!("{others} other processes match '{t}'; this is the most active one"));
+        ans.notes.push(format!(
+            "{others} other processes match '{t}'; this is the most active one"
+        ));
     }
     if json {
         println!("{}", out::json(&ans));
