@@ -9,9 +9,21 @@ cd "$(dirname "$0")" || exit 1
 CASES=("$@")
 [ ${#CASES[@]} -eq 0 ] && CASES=(cpu cpu-wait cpu-limit disk memory lock-file lock-mutex peer-pipe peer-tcp child idle)
 
+# With kernel.yama.ptrace_scope >= 1 (the Ubuntu default) an ordinary user
+# cannot read the system call of a process that is not its descendant, so
+# cases that need it are skipped. Run as root to cover them.
+limited=0
+if [ "$(id -u)" != 0 ] && [ "$(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo 0)" != 0 ]; then
+  limited=1
+  echo "note: ptrace_scope restricts this user; cases marked 'needs: syscall' are skipped"
+fi
+
 pass=0 fail=0 skipped=0
 for c in "${CASES[@]}"; do
   f=${c%.sh}.sh
+  if [ $limited -eq 1 ] && grep -q '^# needs: syscall' "$f"; then
+    printf 'skip  %s\n' "$c"; skipped=$((skipped + 1)); continue
+  fi
   out=$(WITS=$WITS WITS_ARGS=--json bash "$f" 2>/dev/null </dev/null)
   rc=$?
   if [ $rc -eq 77 ]; then

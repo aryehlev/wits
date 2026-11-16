@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # A thread queued on a mutex held by another thread of the same process.
+# needs: syscall
 # expect: "cause":"lock"
 # expect: "kind":"thread"
 # expect: "name":"holder"

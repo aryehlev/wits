@@ -188,7 +188,13 @@ fn by_wchan(w: Option<&str>, d: bool) -> Wait {
     } else if w.contains("partner") || w.contains("fifo_open") {
         Wait::Open { ptr: 0 }
     } else if w.contains("pipe") {
-        Wait::Blind { what: "pipe" }
+        Wait::Blind {
+            what: if w.contains("writ") {
+                "pipe (writing)"
+            } else {
+                "pipe"
+            },
+        }
     } else if w.contains("tty") {
         Wait::Park {
             what: "terminal input",
@@ -237,6 +243,23 @@ pub fn classify(state: char, sc: Option<Syscall>, wchan: Option<&str>) -> Option
     };
     let (kind, name) = sysno::lookup(nr);
     let fd = args[0] as i32;
+    // Calls that copy between two descriptors: the kernel wait symbol says
+    // whether the source is empty or the destination is full.
+    let (kind, fd) = match kind {
+        Kind::Splice | Kind::Sendfile => {
+            let (src, dst) = if kind == Kind::Splice {
+                (args[0], args[2])
+            } else {
+                (args[1], args[0])
+            };
+            if wchan.map(|w| w.contains("writ")).unwrap_or(false) {
+                (Kind::Write, dst as i32)
+            } else {
+                (Kind::Read, src as i32)
+            }
+        }
+        k => (k, fd),
+    };
     Some(match kind {
         Kind::Read | Kind::Write if d => Wait::Disk { sys: name, fd },
         Kind::Read => Wait::Io {
@@ -287,6 +310,7 @@ pub fn classify(state: char, sc: Option<Syscall>, wchan: Option<&str>) -> Option
             n: 0,
         },
         Kind::Ipc => Wait::Ipc { sys: name },
+        Kind::Splice | Kind::Sendfile => unreachable!(),
         Kind::Other => match by_wchan(wchan, d) {
             Wait::Unknown { why, d } if !d && why.is_empty() => Wait::Park {
                 what: "a system call",
@@ -576,6 +600,9 @@ pub fn sample(pid: i32, dur: Duration) -> Option<Profile> {
         17..=128 => 20,
         _ => 50,
     });
+    // Test hook: behave as if the kernel refused to show system calls
+    // (what kernel.yama.ptrace_scope=1 does), to exercise the fallback.
+    let no_syscall = std::env::var_os("WITS_NO_SYSCALL").is_some();
     let start = Instant::now();
     let deadline = start + dur;
     let mut i: u32 = 0;
@@ -597,7 +624,12 @@ pub fn sample(pid: i32, dur: Duration) -> Option<Profile> {
                 None
             } else {
                 let base = format!("/proc/{pid}/task/{tid}");
-                let sc = match proc::slurp_perm(&format!("{base}/syscall")) {
+                let read = if no_syscall {
+                    Err(true)
+                } else {
+                    proc::slurp_perm(&format!("{base}/syscall"))
+                };
+                let sc = match read {
                     Ok(t) => {
                         p.saw_syscall = true;
                         proc::parse_syscall(&t)
@@ -691,6 +723,27 @@ mod tests {
         assert_eq!(
             classify('D', sc(libc::SYS_read, a), Some("folio_wait_bit_common")),
             Some(Wait::Disk { sys: "read", fd: 5 })
+        );
+    }
+
+    #[test]
+    fn splice_direction_comes_from_the_wait_symbol() {
+        let a = [0, 0, 1, 0, 0, 0];
+        assert_eq!(
+            classify('S', sc(libc::SYS_splice, a), Some("pipe_wait_readable")),
+            Some(Wait::Io {
+                fd: 0,
+                write: false,
+                sys: "splice"
+            })
+        );
+        assert_eq!(
+            classify('S', sc(libc::SYS_splice, a), Some("pipe_wait_writable")),
+            Some(Wait::Io {
+                fd: 1,
+                write: true,
+                sys: "splice"
+            })
         );
     }
 

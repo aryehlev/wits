@@ -11,6 +11,10 @@ pub enum Kind {
     Read,
     /// Writes to fd in arg 0.
     Write,
+    /// splice(in, _, out, ..): moves data between two descriptors.
+    Splice,
+    /// sendfile(out, in, ..)
+    Sendfile,
     /// Flushes fd in arg 0 to storage.
     Sync,
     /// Flushes with no fd (sync).
@@ -56,7 +60,7 @@ const COMMON: &[(c_long, Kind, &str)] = table! {
     SYS_preadv2 => Read, SYS_recvfrom => Read, SYS_recvmsg => Read, SYS_recvmmsg => Read,
     SYS_write => Write, SYS_writev => Write, SYS_pwrite64 => Write, SYS_pwritev => Write,
     SYS_pwritev2 => Write, SYS_sendto => Write, SYS_sendmsg => Write, SYS_sendmmsg => Write,
-    SYS_sendfile => Write, SYS_splice => Write, SYS_copy_file_range => Write,
+    SYS_sendfile => Sendfile, SYS_splice => Splice, SYS_copy_file_range => Splice,
     SYS_fsync => Sync, SYS_fdatasync => Sync, SYS_syncfs => Sync, SYS_sync_file_range => Sync,
     SYS_sync => SyncAll, SYS_msync => SyncAll,
     SYS_openat => Open1,

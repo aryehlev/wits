@@ -390,6 +390,11 @@ impl<'a> Ctx<'a> {
     fn resolve(&self, w: &Wait) -> Res {
         let r = |cat, label: String, fd| Res { cat, label, fd };
         match w {
+            // A hidden uninterruptible wait while memory is short is, in
+            // all likelihood, a page being read back in.
+            Wait::Disk { sys, fd: -1 } if sys.is_empty() && (self.swap_in || self.limit_hit) => {
+                self.resolve(&Wait::Fault)
+            }
             Wait::Disk { sys, fd } => {
                 let on = match self.p.fds.get(fd) {
                     Some(i) => format!(" on {}", i.link),
@@ -544,31 +549,58 @@ impl<'a> Ctx<'a> {
             ),
             Wait::Park { what } => r(Cat::Idle, format!("waiting for {what}"), None),
             Wait::Blind { what } => {
-                // Guess the descriptor when there is only one candidate.
+                // The descriptor is hidden; guess it from what the process holds.
+                let pipe = what.starts_with("pipe");
+                let writing = what.ends_with("(writing)");
                 let mut c: Vec<i32> = self
                     .p
                     .fds
                     .iter()
-                    .filter(|(fd, i)| match (*what, &i.kind) {
-                        ("pipe", FdKind::Pipe | FdKind::Fifo) => true,
-                        ("socket", FdKind::Socket(_)) => self.role(**fd) == Role::Conn,
-                        _ => false,
+                    .filter(|(fd, i)| {
+                        self.role(**fd) == Role::Conn
+                            && match &i.kind {
+                                FdKind::Pipe | FdKind::Fifo => pipe,
+                                FdKind::Socket(_) => !pipe,
+                                _ => false,
+                            }
                     })
                     .map(|(fd, _)| *fd)
                     .collect();
                 c.sort_unstable();
                 let has_tty = self.p.fds.values().any(|i| i.kind == FdKind::Tty);
-                if c.is_empty() && *what == "socket" && has_tty {
-                    r(Cat::Idle, "waiting for terminal input".into(), None)
-                } else if c.len() == 1 {
-                    r(
-                        Cat::Peer,
-                        format!("blocked on fd {}, {}", c[0], self.fd_desc(c[0])),
-                        Some(c[0]),
-                    )
+                // Several candidates: a pipe read is most likely standard
+                // input, a pipe write standard output.
+                let std = if writing { 1 } else { 0 };
+                let guess = if c.len() == 1 {
+                    Some((c[0], ""))
+                } else if pipe && c.contains(&std) {
+                    Some((std, "probably "))
                 } else {
-                    r(Cat::Peer, format!("blocked on a {what}"), None)
+                    None
+                };
+                match guess {
+                    _ if c.is_empty() && !pipe && has_tty => {
+                        r(Cat::Idle, "waiting for terminal input".into(), None)
+                    }
+                    Some((fd, hedge)) => r(
+                        Cat::Peer,
+                        format!(
+                            "blocked {} {hedge}fd {fd}, {}{}",
+                            if writing { "writing to" } else { "reading" },
+                            self.fd_desc(fd),
+                            self.timing_suffix(fd)
+                        ),
+                        Some(fd),
+                    ),
+                    None => r(
+                        Cat::Peer,
+                        format!("blocked on a {}", if pipe { "pipe" } else { "socket" }),
+                        None,
+                    ),
                 }
+            }
+            Wait::Unknown { d: true, .. } if self.swap_in || self.limit_hit => {
+                self.resolve(&Wait::Fault)
             }
             Wait::Unknown { d: true, why } => {
                 let w = if why.is_empty() {
@@ -744,7 +776,13 @@ fn peer_blame(cx: &Ctx, res: &Res, wait: &Wait) -> Blame {
     let Some(info) = cx.p.fds.get(&fd) else {
         return unseen();
     };
-    let writing = matches!(wait, Wait::Io { write: true, .. });
+    let writing = matches!(
+        wait,
+        Wait::Io { write: true, .. }
+            | Wait::Blind {
+                what: "pipe (writing)"
+            }
+    );
     match &info.kind {
         FdKind::Pipe | FdKind::Fifo => match pick(holders(&info.link, pid, Some(!writing)), pid) {
             Some((p, more)) => process_blame(p, more, ""),
@@ -1295,7 +1333,15 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
         let faulting = th
             .waits
             .keys()
-            .find(|w| matches!(w, Wait::Fault | Wait::Mem { .. }))
+            .find(|w| {
+                matches!(
+                    w,
+                    Wait::Fault
+                        | Wait::Mem { .. }
+                        | Wait::Disk { sys: "", fd: -1 }
+                        | Wait::Unknown { d: true, .. }
+                )
+            })
             .cloned();
         if let (Some(w), true) = (faulting, mem_hit.is_some()) {
             let sys_ns = th.stime.1.saturating_sub(th.stime.0) as f64 / tck * 1e9;
@@ -1374,7 +1420,7 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
     let blind = !p.saw_syscall && p.threads.values().any(|t| !t.waits.is_empty());
     if blind {
         notes.push(format!(
-            "limited view: the kernel would not show what pid {pid} is blocked in (another user's process, or ptrace_scope); try sudo"
+            "limited view: the kernel hides what pid {pid} is blocked in (another user's process, or kernel.yama.ptrace_scope=1 as on Ubuntu); sudo wits sees it"
         ));
     }
 
@@ -1399,6 +1445,10 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
         notes,
     };
 
+    if stopped_ns > 0.5 * total || active_ns < 0.05 * window_ns {
+        // No cause will be named: shares of next to nothing mean nothing.
+        ans.breakdown.iter_mut().for_each(|b| b.1 = 0.0);
+    }
     if stopped_ns > 0.5 * total {
         ans.state = "stopped";
         ans.idle_what = resolved[&Wait::Stopped].label.clone();
