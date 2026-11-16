@@ -1,19 +1,22 @@
 [package]
 name = "wits"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2021"
-rust-version = "1.74"
-description = "Explain why a process is slow on your Linux system. No root, no eBPF, one static binary."
+rust-version = "1.88"
+description = "Explain why a process is slow, and where in its code: Linux (procfs, eBPF) and macOS, any language, one binary."
 license = "MIT"
 repository = "https://github.com/aryehlev/wits"
 homepage = "https://github.com/aryehlev/wits"
 readme = "README.md"
-keywords = ["linux", "performance", "procfs", "debugging", "cli"]
+keywords = ["performance", "profiler", "ebpf", "debugging", "cli"]
 categories = ["command-line-utilities", "development-tools::profiling"]
 include = ["/src/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
 
 [dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+blazesym = { version = "0.2", default-features = false, features = ["demangle", "dwarf", "zlib"] }
 
 [profile.release]
 opt-level = 2

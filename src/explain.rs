@@ -1,7 +1,10 @@
 //! Turns a sampled profile into one answer: the cause, its share of the
 //! process's time, the specific object, and who is to blame.
 
+use crate::code::{self, Stacks};
 use crate::net::{self, Sock};
+use crate::prof;
+use crate::symbolize::Symbolizer;
 use crate::proc;
 use crate::sample::{self, FdKind, Profile, Wait, EV_BLIND};
 use crate::sys::{self, SysDelta, SysSnap};
@@ -9,118 +12,10 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::time::Duration;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum Cat {
-    Cpu,
-    CpuWait,
-    Disk,
-    Memory,
-    Lock,
-    Peer,
-    Idle,
-}
+pub use crate::answer::{Answer, Blame, Cat, Opts, CAUSES};
 
-pub const CAUSES: [Cat; 6] = [
-    Cat::Cpu,
-    Cat::CpuWait,
-    Cat::Disk,
-    Cat::Memory,
-    Cat::Lock,
-    Cat::Peer,
-];
-
-impl Cat {
-    pub fn key(self) -> &'static str {
-        match self {
-            Cat::Cpu => "cpu",
-            Cat::CpuWait => "cpu-wait",
-            Cat::Disk => "disk",
-            Cat::Memory => "memory",
-            Cat::Lock => "lock",
-            Cat::Peer => "peer",
-            Cat::Idle => "idle",
-        }
-    }
-
-    /// "<name> is ..."
-    pub fn headline(self) -> &'static str {
-        match self {
-            Cat::Cpu => "busy on CPU, not blocked",
-            Cat::CpuWait => "waiting for a CPU",
-            Cat::Disk => "waiting for disk",
-            Cat::Memory => "short of memory",
-            Cat::Lock => "waiting for a lock",
-            Cat::Peer => "waiting for someone else",
-            Cat::Idle => "idle",
-        }
-    }
-
-    fn state(self) -> &'static str {
-        match self {
-            Cat::Cpu => "working",
-            Cat::Peer => "waiting",
-            Cat::Idle => "idle",
-            _ => "stalled",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Blame {
-    /// "self" | "process" | "thread" | "cgroup" | "remote" | "device" | "unknown"
-    pub kind: &'static str,
-    pub pid: Option<i32>,
-    pub name: Option<String>,
-    pub text: String,
-}
-
-impl Blame {
-    fn new(kind: &'static str, text: String) -> Blame {
-        Blame {
-            kind,
-            pid: None,
-            name: None,
-            text,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Answer {
-    pub pid: i32,
-    pub name: String,
-    pub cmdline: String,
-    /// Parents wits walked through because they were only waiting for a child.
-    pub followed: Vec<(i32, String)>,
-    pub window_ms: u64,
-    pub threads: usize,
-    pub samples: u32,
-    /// "working" | "stalled" | "waiting" | "idle" | "stopped" | "unknown"
-    pub state: &'static str,
-    pub cause: Option<Cat>,
-    /// Share of the process's non-idle time taken by the cause (0..1).
-    pub share: f64,
-    /// Non-idle thread time divided by the window: 1.0 is one busy thread.
-    pub active: f64,
-    pub what: String,
-    pub blame: Option<Blame>,
-    /// Share of non-idle time for each of the six causes.
-    pub breakdown: Vec<(Cat, f64)>,
-    /// Fraction of all thread time that was idle, and what the idle time was.
-    pub idle: f64,
-    pub idle_what: String,
-    pub confidence: &'static str,
-    pub notes: Vec<String>,
-}
-
-#[derive(Clone, Copy)]
-pub struct Opts {
-    pub dur: Duration,
-    pub follow: bool,
-    /// Skip system-wide scans and blame lookups (used when describing a
-    /// blamed process in passing).
-    pub light: bool,
-}
+/// On-CPU stack sampling frequency for eBPF.
+pub const FREQ: u64 = 499;
 
 struct Res {
     cat: Cat,
@@ -711,6 +606,7 @@ fn doing(pid: i32) -> Option<String> {
             dur: Duration::from_millis(200),
             follow: false,
             light: true,
+            stacks: false,
         },
     )?;
     Some(match a.cause {
@@ -733,11 +629,15 @@ fn process_blame(pid: i32, more: usize, lead: &str) -> Blame {
     } else {
         String::new()
     };
+    let pod = crate::k8s::pod_label(pid);
+    let in_pod = pod.as_deref().map(|p| format!(", pod {p}")).unwrap_or_default();
     Blame {
         kind: "process",
         pid: Some(pid),
         name: Some(name.clone()),
-        text: format!("{lead}pid {pid} ({name}){d}{extra}"),
+        text: format!("{lead}pid {pid} ({name}{in_pod}){d}{extra}"),
+        pod,
+        ..Blame::default()
     }
 }
 
@@ -803,14 +703,33 @@ fn peer_blame(cx: &Ctx, res: &Res, wait: &Wait) -> Blame {
                     })
                     .collect();
                 let is_local = remote.ip().is_loopback() || local_ips.contains(&remote.ip());
+                let conn = Some((
+                    std::net::SocketAddr::new(local.ip(), local.port),
+                    std::net::SocketAddr::new(remote.ip(), remote.port),
+                ));
                 if !is_local {
+                    // Another network namespace on this node: a container or pod.
+                    let owner = crate::k8s::tcp_owner(
+                        Some((local.ip(), local.port)),
+                        Some((remote.ip(), remote.port)),
+                    )
+                    .filter(|&p| p != pid);
+                    if let Some(p) = owner {
+                        return Blame {
+                            conn,
+                            ..process_blame(p, 0, "")
+                        };
+                    }
                     let svc = net::port_name(remote.port)
                         .map(|n| format!(" ({n})"))
                         .unwrap_or_default();
-                    return Blame::new(
-                        "remote",
-                        format!("remote host {remote}{svc}: not a process on this machine"),
-                    );
+                    return Blame {
+                        conn,
+                        ..Blame::new(
+                            "remote",
+                            format!("remote host {remote}{svc}: not a process on this machine"),
+                        )
+                    };
                 }
                 let mut peer_ino = None;
                 let mut listen_ino = None;
@@ -942,6 +861,7 @@ fn lock_blame(
                         pid: Some(tid),
                         name: Some(tname.clone()),
                         text: format!("{w}held by its own thread {tid} ({tname}){busy}"),
+                        ..Blame::default()
                     }
                 }
                 None => Blame::new(
@@ -1032,6 +952,8 @@ fn cpu_wait_answer(
                     "pid {hp} ({name}) used {:.1} CPUs in the same window{second}",
                     secs / d.secs
                 ),
+                pod: crate::k8s::pod_label(hp),
+                ..Blame::default()
             }
         }
         _ => Blame::new(
@@ -1083,6 +1005,7 @@ fn disk_answer(p: &Profile, res: &Res, delta: Option<&SysDelta>) -> (String, Bla
                 pid: Some(op),
                 name: Some(name.clone()),
                 text: format!("pid {op} ({name}) did the most I/O in the same window: {}", rw(v)),
+                ..Blame::default()
             }
         }
         _ if own.0 + own.1 > 0 => Blame::new(
@@ -1166,6 +1089,8 @@ fn memory_answer(
                     proc::fmt_bytes(pages * page),
                     proc::fmt_bytes(total)
                 ),
+                pod: crate::k8s::pod_label(big),
+                ..Blame::default()
             }
         }
         None => Blame::new("unknown", "memory pressure on the machine".into()),
@@ -1239,6 +1164,11 @@ fn split_thread(th: &sample::Th, wall: f64, tck: f64) -> Vec<(Key, f64)> {
 }
 
 pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
+    analyze_full(pid, opts).map(|x| x.0)
+}
+
+/// The answer, and the stacks behind its code view.
+pub fn analyze_full(pid: i32, opts: Opts) -> Option<(Answer, Option<Stacks>)> {
     let mut pid = pid;
     let mut followed = Vec::new();
     if opts.follow {
@@ -1268,7 +1198,19 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
     let hits0 = sys::mem_limit_hits(&mem_chain);
     let snap0 = (!opts.light).then(SysSnap::take);
 
-    let p = sample::sample(pid, opts.dur)?;
+    let session = opts
+        .stacks
+        .then(|| crate::ebpf::Session::start(&[pid], false, FREQ));
+    let p = sample::sample(pid, opts.dur, opts.stacks)?;
+    let raw = match &session {
+        Some(Ok(s)) => Some(s.collect()),
+        _ => None,
+    };
+    let why_no_cpu = match &session {
+        Some(Err(e)) => Some(e.clone()),
+        _ => None,
+    };
+    drop(session);
 
     let delta = snap0.map(|a| SysDelta::between(&a, &SysSnap::take()));
     let thr1 = sys::throttled_ns(&cpu_chain);
@@ -1313,6 +1255,7 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
 
     let mut cat_ns: HashMap<Cat, f64> = HashMap::new();
     let mut wait_ns: HashMap<Wait, f64> = HashMap::new();
+    let mut tid_wait_ns: HashMap<(i32, Wait), f64> = HashMap::new();
     let mut per_thread: HashMap<i32, Vec<(Cat, String, f64)>> = HashMap::new();
     let mut total = 0.0;
     let mut samples = 0;
@@ -1363,6 +1306,9 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
                 Key::Rq => (Cat::CpuWait, String::new()),
                 Key::W(w) => {
                     *wait_ns.entry(w.clone()).or_default() += ns;
+                    if opts.stacks {
+                        *tid_wait_ns.entry((*tid, w.clone())).or_default() += ns;
+                    }
                     let r = &resolved[w];
                     (r.cat, r.label.clone())
                 }
@@ -1373,6 +1319,40 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
         per_thread.insert(*tid, mine);
     }
 
+    let code_stacks = opts.stacks.then(|| {
+        let mut per: HashMap<(i32, &Wait), usize> = HashMap::new();
+        for (tid, w, _) in &p.captures {
+            *per.entry((*tid, w)).or_default() += 1;
+        }
+        let scans = p
+            .captures
+            .iter()
+            .filter_map(|(tid, w, st)| {
+                let ns = tid_wait_ns.get(&(*tid, w.clone()))?;
+                Some(prof::Scan {
+                    pid,
+                    tid: *tid,
+                    cat: resolved.get(w)?.cat,
+                    ns: ns / per[&(*tid, w)] as f64,
+                    stack: st,
+                })
+            })
+            .collect();
+        let mut sym = Symbolizer::new();
+        prof::stacks(
+            prof::Inputs {
+                pids: vec![(pid, p.comm.clone())],
+                scans,
+                raw: raw.as_deref(),
+                cpu_ns: cat_ns.get(&Cat::Cpu).copied().unwrap_or(0.0),
+                rq_ns: cat_ns.get(&Cat::CpuWait).copied().unwrap_or(0.0),
+                why_no_cpu,
+                measured: None,
+                in_run: false,
+            },
+            &mut sym,
+        )
+    });
     let idle_ns = cat_ns.get(&Cat::Idle).copied().unwrap_or(0.0);
     let active_ns = (total - idle_ns).max(0.0);
     let top_wait = |cat: Cat| -> Option<(&Wait, &Res)> {
@@ -1443,6 +1423,8 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
         idle_what,
         confidence: "high",
         notes,
+        code: code_stacks.as_ref().map(|s| code::summarize(s, 3)),
+        pod: crate::k8s::pod_label(pid),
     };
 
     if stopped_ns > 0.5 * total || active_ns < 0.05 * window_ns {
@@ -1452,7 +1434,7 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
     if stopped_ns > 0.5 * total {
         ans.state = "stopped";
         ans.idle_what = resolved[&Wait::Stopped].label.clone();
-        return Some(ans);
+        return Some((ans, code_stacks));
     }
     // Less than 5% of one thread's time doing or waiting for anything.
     if active_ns < 0.05 * window_ns {
@@ -1471,7 +1453,7 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
                 ans.state = "unknown";
             }
         }
-        return Some(ans);
+        return Some((ans, code_stacks));
     }
 
     let (cause, share) = ans.breakdown[0];
@@ -1555,7 +1537,7 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
     ) {
         ans.confidence = "low";
     }
-    Some(ans)
+    Some((ans, code_stacks))
 }
 
 #[cfg(test)]

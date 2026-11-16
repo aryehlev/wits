@@ -200,15 +200,7 @@ pub fn label(pid: i32) -> String {
     shorten(&words.join(" "), 60)
 }
 
-pub fn shorten(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let mut t: String = s.chars().take(max - 1).collect();
-        t.push('…');
-        t
-    }
-}
+pub use crate::out::shorten;
 
 pub fn status_field(pid: i32, key: &str) -> Option<String> {
     let s = slurp(&format!("/proc/{pid}/status"))?;

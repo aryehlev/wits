@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install wits: one static binary, no dependencies.
+# Install wits: one binary, no dependencies.
 #
 #   curl -fsSL https://raw.githubusercontent.com/aryehlev/wits/main/install.sh | sh
 #
@@ -11,10 +11,14 @@ set -eu
 REPO=aryehlev/wits
 DIR=${WITS_INSTALL_DIR:-$HOME/.local/bin}
 
-[ "$(uname -s)" = Linux ] || { echo "wits only runs on Linux (it reads /proc)." >&2; exit 1; }
+case "$(uname -s)" in
+  Linux) OS=unknown-linux-musl ;;
+  Darwin) OS=apple-darwin ;;
+  *) echo "wits runs on Linux and macOS." >&2; exit 1 ;;
+esac
 case "$(uname -m)" in
-  x86_64 | amd64) TARGET=x86_64-unknown-linux-musl ;;
-  aarch64 | arm64) TARGET=aarch64-unknown-linux-musl ;;
+  x86_64 | amd64) TARGET=x86_64-$OS ;;
+  aarch64 | arm64) TARGET=aarch64-$OS ;;
   *) echo "no prebuilt wits for $(uname -m); try: cargo install wits" >&2; exit 1 ;;
 esac
 
@@ -39,6 +43,8 @@ fetch "$BASE/$FILE" "$TMP/$FILE"
 fetch "$BASE/$FILE.sha256" "$TMP/$FILE.sha256"
 if command -v sha256sum >/dev/null 2>&1; then
   (cd "$TMP" && sha256sum -c "$FILE.sha256" >/dev/null) || { echo "checksum mismatch for $FILE" >&2; exit 1; }
+elif command -v shasum >/dev/null 2>&1; then
+  (cd "$TMP" && shasum -a 256 -c "$FILE.sha256" >/dev/null) || { echo "checksum mismatch for $FILE" >&2; exit 1; }
 fi
 tar -xzf "$TMP/$FILE" -C "$TMP"
 mkdir -p "$DIR"

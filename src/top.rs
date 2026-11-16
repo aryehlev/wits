@@ -1,20 +1,12 @@
 //! `wits` with no arguments: find the processes that are waiting most right
 //! now, then explain each of them.
 
-use crate::explain::{self, Answer, Opts};
+pub use crate::answer::Row;
+use crate::explain::{self, Opts};
 use crate::proc;
 use crate::sys;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-
-pub struct Row {
-    pub pid: i32,
-    pub name: String,
-    /// Time spent waiting for something (not idle, not on CPU), as a fraction
-    /// of the window, summed over threads.
-    pub waiting: f64,
-    pub answer: Option<Answer>,
-}
 
 #[derive(Default)]
 struct Acc {
@@ -131,6 +123,7 @@ pub fn overview(dur: Duration) -> (Vec<Row>, u64) {
                         dur: left,
                         follow: false,
                         light: false,
+                        stacks: false,
                     },
                 )
             })

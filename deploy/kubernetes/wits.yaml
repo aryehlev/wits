@@ -1,0 +1,125 @@
+# wits on every node: an agent that answers for the processes on its node,
+# and follows blame to the agents on other nodes.
+#
+#   kubectl create namespace wits
+#   kubectl -n wits create secret generic wits-token --from-literal=token="$(head -c 32 /dev/urandom | base64)"
+#   kubectl apply -f deploy/kubernetes/wits.yaml
+#   kubectl wits <namespace>/<pod>          # deploy/kubectl-wits, on your PATH
+#
+# What it can read: every process on the node (hostPID), their stacks
+# (privileged, for eBPF and /proc/<pid>/mem), and the kubelet's log
+# directory names (to name pods). It changes nothing. The agents listen on
+# their pod IPs, and every request needs the token.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wits
+---
+# Headless: resolves to every agent, which is how agents find each other.
+apiVersion: v1
+kind: Service
+metadata:
+  name: wits-peers
+  namespace: wits
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: wits
+  ports:
+    - name: agent
+      port: 7477
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: wits-peers-only
+  namespace: wits
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: wits
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: wits
+      ports:
+        - port: 7477
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: wits
+  namespace: wits
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: wits
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: wits
+    spec:
+      hostPID: true
+      automountServiceAccountToken: false
+      tolerations:
+        - operator: Exists
+      priorityClassName: system-node-critical
+      containers:
+        - name: wits
+          image: ghcr.io/aryehlev/wits:v2.0.0
+          args: ["agent", "--listen", "0.0.0.0:7477"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: WITS_PEERS
+              value: wits-peers.wits.svc.cluster.local:7477
+            - name: WITS_TOKEN_FILE
+              value: /var/run/wits/token
+            - name: WITS_HOST_ROOT
+              value: /host
+          ports:
+            - name: agent
+              containerPort: 7477
+          readinessProbe:
+            tcpSocket:
+              port: 7477
+          securityContext:
+            privileged: true
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: token
+              mountPath: /var/run/wits
+              readOnly: true
+            - name: varlog
+              mountPath: /host/var/log
+              readOnly: true
+            - name: tracefs
+              mountPath: /sys/kernel/tracing
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: token
+          secret:
+            secretName: wits-token
+            items:
+              - key: token
+                path: token
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: tracefs
+          hostPath:
+            path: /sys/kernel/tracing
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,30 @@
+#!/bin/sh
+# kubectl wits: why is this pod slow?
+#
+#   kubectl wits <namespace>/<pod>[/<container>] [wits options]
+#   kubectl wits node <node> [wits options]     the busiest waits on a node
+#
+# Runs wits in the agent on the pod's node; that agent follows blame to the
+# agents on other nodes. Needs the DaemonSet in deploy/kubernetes/wits.yaml.
+set -eu
+NS=${WITS_NAMESPACE:-wits}
+usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || usage
+case $1 in
+  -h|--help) usage ;;
+  node)
+    [ $# -ge 2 ] || usage
+    node=$2; shift 2; set -- "$@" ;;
+  */*)
+    target=$1; shift
+    pns=${target%%/*}; rest=${target#*/}; pod=${rest%%/*}
+    node=$(kubectl get pod -n "$pns" "$pod" -o jsonpath='{.spec.nodeName}')
+    [ -n "$node" ] || { echo "kubectl-wits: pod $pns/$pod is not scheduled on a node" >&2; exit 1; }
+    set -- "$target" "$@" ;;
+  *) echo "kubectl-wits: give <namespace>/<pod>, or: node <node>" >&2; exit 2 ;;
+esac
+agent=$(kubectl get pod -n "$NS" -l app.kubernetes.io/name=wits \
+  --field-selector "spec.nodeName=$node" -o jsonpath='{.items[0].metadata.name}')
+[ -n "$agent" ] || { echo "kubectl-wits: no wits agent on node $node (is the DaemonSet installed?)" >&2; exit 1; }
+tty=; [ -t 1 ] && tty=-t
+exec kubectl exec -n "$NS" $tty "$agent" -- wits "$@"

@@ -396,6 +396,9 @@ pub struct Th {
     pub n: u32,
     pub running: u32,
     pub waits: HashMap<Wait, u32>,
+    /// Tick of the last stack capture, and how many were taken.
+    pub last_cap: Option<u32>,
+    pub ncap: u32,
 }
 
 pub struct Profile {
@@ -418,6 +421,8 @@ pub struct Profile {
     pub capped: bool,
     pub locks: Option<String>,
     pub nice: i64,
+    /// User stacks of blocked threads: thread, what it waited for, stack.
+    pub captures: Vec<(i32, Wait, Vec<u64>)>,
     mem: Option<Option<fs::File>>,
 }
 
@@ -477,7 +482,9 @@ impl Profile {
                 let n = n.min(256) as usize;
                 let b = self.mem_read(a, n * 8)?;
                 Some(
-                    b.chunks_exact(8)
+                    b.as_chunks::<8>()
+                        .0
+                        .iter()
                         .map(|c| i32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
                         .filter(|&fd| fd >= 0)
                         .collect(),
@@ -571,8 +578,13 @@ fn list_tids(pid: i32, capped: &mut bool) -> Vec<i32> {
     t
 }
 
+/// Capture a blocked thread's stack at most this often, and this many times.
+const CAPTURE_EVERY: u32 = 4;
+const CAPTURE_MAX: u32 = 50;
+
 /// Sample `pid` for `dur`. Returns `None` if the process does not exist.
-pub fn sample(pid: i32, dur: Duration) -> Option<Profile> {
+/// With `stacks`, also capture the user stack of blocked threads.
+pub fn sample(pid: i32, dur: Duration, stacks: bool) -> Option<Profile> {
     let st = proc::stat(pid)?;
     let mut p = Profile {
         pid,
@@ -591,8 +603,23 @@ pub fn sample(pid: i32, dur: Duration) -> Option<Profile> {
         capped: false,
         locks: None,
         nice: st.nice,
+        captures: Vec::new(),
         mem: None,
     };
+    let memf = if stacks {
+        fs::File::open(format!("/proc/{pid}/mem")).ok()
+    } else {
+        None
+    };
+    let maps = match &memf {
+        Some(_) => proc::slurp(&format!("/proc/{pid}/maps"))
+            .map(|s| crate::symbolize::parse_maps(&s))
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let mut scanner = memf
+        .as_ref()
+        .map(|f| crate::stackscan::Scanner::new(f, &maps));
     p.load_fds();
     let mut tids = list_tids(pid, &mut p.capped);
     let tick = Duration::from_millis(match tids.len() {
@@ -607,7 +634,7 @@ pub fn sample(pid: i32, dur: Duration) -> Option<Profile> {
     let deadline = start + dur;
     let mut i: u32 = 0;
     loop {
-        if i > 0 && i % 8 == 0 {
+        if i > 0 && i.is_multiple_of(8) {
             tids = list_tids(pid, &mut p.capped);
         }
         let mut alive = false;
@@ -629,20 +656,24 @@ pub fn sample(pid: i32, dur: Duration) -> Option<Profile> {
                 } else {
                     proc::slurp_perm(&format!("{base}/syscall"))
                 };
-                let sc = match read {
+                let (sc, regs) = match read {
                     Ok(t) => {
                         p.saw_syscall = true;
-                        proc::parse_syscall(&t)
+                        (proc::parse_syscall(&t), crate::stackscan::sp_pc(&t))
                     }
                     Err(denied) => {
                         p.denied |= denied;
-                        None
+                        (None, None)
                     }
                 };
                 let wchan = proc::slurp(&format!("{base}/wchan"))
                     .map(|w| w.trim().to_string())
                     .filter(|w| !w.is_empty() && w != "0");
-                classify(s.state, sc, wchan.as_deref())
+                classify(s.state, sc, wchan.as_deref()).map(|w| (w, regs))
+            };
+            let (wait, regs) = match wait {
+                Some((w, r)) => (Some(w), r),
+                None => (None, None),
             };
             if let Some(w) = &wait {
                 p.note(w, tid, &tids);
@@ -662,10 +693,20 @@ pub fn sample(pid: i32, dur: Duration) -> Option<Profile> {
             th.stime.1 = s.stime;
             th.majflt.1 = s.majflt;
             th.n += 1;
+            let mut cap = None;
+            if let (Some(sc), Some(w), Some((sp, pc))) = (scanner.as_mut(), &wait, regs) {
+                let due = th.last_cap.map(|t| i >= t + CAPTURE_EVERY).unwrap_or(true);
+                if due && th.ncap < CAPTURE_MAX && !matches!(w, Wait::Stopped) {
+                    th.last_cap = Some(i);
+                    th.ncap += 1;
+                    cap = Some((tid, w.clone(), sc.stack(sp, pc)));
+                }
+            }
             match wait {
                 None => th.running += 1,
                 Some(w) => *th.waits.entry(w).or_default() += 1,
             }
+            p.captures.extend(cap);
         }
         i += 1;
         if !alive {

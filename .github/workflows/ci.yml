@@ -23,5 +23,20 @@ jobs:
       - run: cargo build --release --target ${{ matrix.target }}
       - name: cases, as an ordinary user
         run: cases/run.sh target/${{ matrix.target }}/release/wits
-      - name: cases, as root (adds the cgroup-limit cases)
+      - name: cases, as root (adds eBPF stacks, cgroup limits, pods and agents)
         run: sudo cases/run.sh target/${{ matrix.target }}/release/wits
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --component clippy
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build --release
+      - name: the improvement loop
+        run: |
+          cc -O1 -g -o work cases/where.c
+          target/release/wits run -o a.json -- ./work 300
+          target/release/wits run -o b.json -- ./work 30
+          target/release/wits diff --json a.json b.json | grep -F '"verdict":"faster"'
