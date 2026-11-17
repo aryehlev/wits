@@ -86,7 +86,17 @@ pub fn where_text(h: &Hot, cat: Cat) -> String {
     let mut s = format!("{} in {}", pct(h.share), h.frame.label());
     if cat == Cat::Cpu {
         if let Some(l) = &h.leaf {
-            s = format!("{} in {} called from {}", pct(h.share), l.func, h.frame.label());
+            let via = h
+                .via
+                .as_ref()
+                .map(|v| format!(" via {}", crate::code::short_func(&v.func)))
+                .unwrap_or_default();
+            s = format!(
+                "{} in {}{via}, called from {}",
+                pct(h.share),
+                crate::code::short_func(&l.func),
+                h.frame.label()
+            );
         }
     }
     if let Some(c) = h.callers.first() {
@@ -261,12 +271,15 @@ pub fn profile_text(a: &Answer, st: &Style) -> String {
 }
 
 fn frame_json(f: &Frame) -> String {
+    let (kind, pkg) = crate::code::origin(f);
     format!(
-        "{{\"func\":{},\"module\":{},\"file\":{},\"line\":{}}}",
+        "{{\"func\":{},\"module\":{},\"file\":{},\"line\":{},\"kind\":{},\"package\":{}}}",
         esc(&f.func),
         esc(&f.module),
         f.file.as_deref().map(esc).unwrap_or_else(|| "null".into()),
-        f.line.map(|l| l.to_string()).unwrap_or_else(|| "null".into())
+        f.line.map(|l| l.to_string()).unwrap_or_else(|| "null".into()),
+        esc(kind.key()),
+        pkg.as_deref().map(esc).unwrap_or_else(|| "null".into())
     )
 }
 
@@ -281,11 +294,12 @@ pub fn code_json(cv: &CodeView) -> String {
                 .map(|h| {
                     let callers: Vec<String> = h.callers.iter().map(frame_json).collect();
                     format!(
-                        "{{\"share\":{},\"seconds\":{},\"frame\":{},\"leaf\":{},\"callers\":[{}]}}",
+                        "{{\"share\":{},\"seconds\":{},\"frame\":{},\"leaf\":{},\"via\":{},\"callers\":[{}]}}",
                         num(h.share),
                         num(h.ns / 1e9),
                         frame_json(&h.frame),
                         h.leaf.as_ref().map(frame_json).unwrap_or_else(|| "null".into()),
+                        h.via.as_ref().map(frame_json).unwrap_or_else(|| "null".into()),
                         callers.join(",")
                     )
                 })

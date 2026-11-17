@@ -3,425 +3,1352 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>wits profile</title>
+<title>wits</title>
 <style>
 :root {
-  --bg: #ffffff; --fg: #1c1c1f; --muted: #6a6a73; --line: #e4e4ea; --card: #f6f6f9;
-  --accent: #2f6fdf; --good: #1f8a5b; --bad: #c8412f; --tip: #1c1c1f; --tipfg: #ffffff;
-  --flame-l: 72%; --flame-fg: #1c1c1f;
+  --bg: #f5f6fa; --surface: #ffffff; --surface-2: #f0f2f7; --surface-3: #e4e7ef;
+  --fg: #14161b; --muted: #5d6474; --faint: #8b92a1; --line: #e3e6ee; --line-2: #cfd4e0;
+  --accent: #5b55f0; --accent-soft: #eceaff; --good: #11966a; --good-soft: #e1f5ec; --bad: #d4462f; --bad-soft: #fdeae6;
+  --shadow: 0 1px 2px rgba(20, 22, 40, .05), 0 6px 20px rgba(20, 22, 40, .06);
+  --tip: #15171d; --tipfg: #f3f4f8; --flame-l: 72; --flame-text: #15171d;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #17171a; --fg: #ececf0; --muted: #9c9ca6; --line: #2e2e35; --card: #202026;
-    --accent: #7aa7ff; --good: #4cc38a; --bad: #ff7a66; --tip: #ececf0; --tipfg: #17171a;
-    --flame-l: 38%; --flame-fg: #f4f4f6;
+    --bg: #0d0f14; --surface: #151820; --surface-2: #1b1f29; --surface-3: #272c38;
+    --fg: #e9ebf1; --muted: #9ba3b3; --faint: #6e7688; --line: #252a35; --line-2: #343a48;
+    --accent: #9590ff; --accent-soft: #24223f; --good: #3dd095; --good-soft: #10291f; --bad: #ff7b65; --bad-soft: #35191a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 28px rgba(0, 0, 0, .28);
+    --tip: #f1f2f6; --tipfg: #12141a; --flame-l: 44; --flame-text: #f7f8fb;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #17171a; --fg: #ececf0; --muted: #9c9ca6; --line: #2e2e35; --card: #202026;
-  --accent: #7aa7ff; --good: #4cc38a; --bad: #ff7a66; --tip: #ececf0; --tipfg: #17171a;
-  --flame-l: 38%; --flame-fg: #f4f4f6;
+  --bg: #0d0f14; --surface: #151820; --surface-2: #1b1f29; --surface-3: #272c38;
+  --fg: #e9ebf1; --muted: #9ba3b3; --faint: #6e7688; --line: #252a35; --line-2: #343a48;
+  --accent: #9590ff; --accent-soft: #24223f; --good: #3dd095; --good-soft: #10291f; --bad: #ff7b65; --bad-soft: #35191a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 28px rgba(0, 0, 0, .28);
+  --tip: #f1f2f6; --tipfg: #12141a; --flame-l: 44; --flame-text: #f7f8fb;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--fg); }
-body { font: 14px/1.45 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
-main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 40px; }
-h1 { font-size: 18px; font-weight: 600; margin: 0 0 10px; line-height: 1.35; }
-h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 26px 0 8px; }
-code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
-.muted { color: var(--muted); }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
-.chip { border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; font-size: 12px; color: var(--muted); }
+body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", sans-serif; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; }
+.mono, code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
+.wrap { max-width: 1260px; margin: 0 auto; padding: 16px 16px 56px; }
+.muted { color: var(--muted); } .faint { color: var(--faint); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* header */
+.top { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; min-height: 34px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; letter-spacing: -.01em; }
+.brand svg { width: 22px; height: 22px; }
+.kindtag { font-size: 12px; color: var(--muted); background: var(--surface-2); border-radius: 999px; padding: 2px 10px; }
+.spacer { flex: 1; }
+.btn { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 7px 12px; font-size: 13px; cursor: pointer; transition: transform .12s, border-color .12s, background .12s; white-space: nowrap; }
+.btn:hover { border-color: var(--line-2); transform: translateY(-1px); }
+.btn:active { transform: translateY(0); }
+.btn.primary { background: var(--accent); border-color: transparent; color: #fff; font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.ghost { border-color: transparent; background: transparent; }
+.btn.ghost:hover { background: var(--surface-2); }
+.btn svg { width: 15px; height: 15px; flex: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* cards */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 18px 20px; }
+.card + .card, .row + .card, .card + .row { margin-top: 14px; }
+.card h2 { flex-wrap: wrap; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.card h2 .sub { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--faint); }
+.row { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; margin-top: 14px; }
+
+/* hero */
+.hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 26px; align-items: center; }
+.donut { position: relative; flex: none; }
+.donut svg { display: block; overflow: visible; }
+.donut .seg { cursor: pointer; transition: stroke-dasharray 1s cubic-bezier(.2, .8, .2, 1), stroke-width .15s; }
+.donut .seg:hover { stroke-width: 22; }
+.donut .center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; text-align: center; }
+.donut .big { font-size: 30px; font-weight: 760; letter-spacing: -.02em; line-height: 1.05; }
+.donut .lbl { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.who { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; color: var(--muted); font-size: 13px; }
+.who b { color: var(--fg); font-size: 14px; }
+.headline { font-size: 26px; line-height: 1.22; margin: 6px 0 4px; letter-spacing: -.02em; font-weight: 720; }
+.subline { color: var(--muted); font-size: 15px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
 .chip b { color: var(--fg); font-weight: 600; }
-.rows { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 6px 0; }
-.rows dt { color: var(--muted); }
-.rows dd { margin: 0; overflow-wrap: anywhere; }
-.bar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: var(--card); margin: 8px 0 6px; }
-.bar span { display: block; height: 100%; }
-.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
-.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 10px 0; }
-.up { border-left: 3px solid var(--accent); padding-left: 12px; margin: 8px 0 0 4px; }
-.up .sum { font-weight: 600; }
-.scroll { overflow-x: auto; }
+.chip.good { background: var(--good-soft); color: var(--good); } .chip.bad { background: var(--bad-soft); color: var(--bad); }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.pill { --c: var(--accent); display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 11px; font-size: 12.5px; cursor: pointer; transition: transform .12s, background .15s, border-color .15s; }
+.pill:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--c) 50%, var(--line)); }
+.pill[aria-pressed="true"] { background: color-mix(in srgb, var(--c) 14%, var(--surface)); border-color: color-mix(in srgb, var(--c) 60%, transparent); font-weight: 600; }
+.pill[aria-pressed="false"] { color: var(--muted); }
+.pill .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
+.pill[aria-pressed="false"] .dot { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
+.pill .t { color: var(--muted); font-weight: 500; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+
+/* fix-here cards */
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: -2px 0 12px; }
+.hot { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 4px 12px; padding: 12px; border-radius: 12px; border: 1px solid var(--line); cursor: pointer; transition: transform .15s, border-color .15s, background .15s; position: relative; overflow: hidden; }
+.hot + .hot { margin-top: 8px; }
+.hot:hover { transform: translateY(-1px); border-color: var(--line-2); background: var(--surface-2); }
+.hot .rank { grid-row: span 3; width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; font-size: 13px; }
+.hot .fname { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 650; font-size: 14px; overflow-wrap: anywhere; }
+.hot .loc { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.hot .chain { font-size: 12px; color: var(--faint); overflow-wrap: anywhere; }
+.hot .share { position: absolute; left: 0; bottom: 0; height: 3px; border-radius: 0 3px 0 0; transition: width .9s cubic-bezier(.2, .8, .2, 1); }
+.hot .pc { position: absolute; right: 12px; top: 10px; font-weight: 720; font-size: 15px; }
+.copy { border: 0; background: var(--surface-2); border-radius: 6px; padding: 1px 7px; cursor: pointer; font-size: 12px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.copy:hover { background: var(--surface-3); color: var(--fg); }
+.badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+.badge.app { background: var(--accent-soft); color: var(--accent); }
+
+/* advice */
+.advice p { margin: 0 0 8px; }
+.advice .try { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; margin: 10px 0 12px; }
+.advice .try b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 2px; }
+.facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0; }
+.facts dt { color: var(--muted); font-size: 13px; }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.up { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; margin-top: 10px; }
+.notes { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+details.more { margin-top: 14px; }
+details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+
+/* explorer */
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+.seg { display: inline-flex; background: var(--surface-2); border-radius: 11px; padding: 3px; gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 8px; font-size: 13px; color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); font-weight: 600; }
+.switch { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px; user-select: none; border: 0; background: transparent; padding: 4px 2px; }
+.switch .track { width: 34px; height: 20px; border-radius: 999px; background: var(--surface-3); position: relative; transition: background .2s; flex: none; }
+.switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .3); transition: transform .2s cubic-bezier(.2, .8, .2, 1); }
+.switch[aria-checked="true"] .track { background: var(--accent); }
+.switch[aria-checked="true"] .track::after { transform: translateX(14px); }
+.search { position: relative; flex: 1 1 180px; max-width: 300px; }
+.search input { width: 100%; padding: 7px 10px 7px 30px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); font: inherit; font-size: 13px; }
+.search svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--faint); }
+.search kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--faint); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; min-height: 0; }
+.filters:empty { display: none; }
+.ftag { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 3px 4px 3px 10px; }
+.ftag button { border: 0; background: transparent; color: inherit; cursor: pointer; border-radius: 50%; width: 18px; height: 18px; line-height: 16px; padding: 0; }
+.ftag button:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.ex { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 14px; align-items: start; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 12.5px; margin-bottom: 6px; min-height: 24px; }
+.crumbs button { border: 0; background: transparent; padding: 2px 6px; border-radius: 6px; cursor: pointer; color: var(--muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crumbs button:hover { background: var(--surface-2); color: var(--fg); }
+.crumbs button:last-child { color: var(--fg); font-weight: 600; }
+.crumbs .sep { color: var(--faint); }
+.fscroll { max-height: 600px; overflow: auto; border-radius: 12px; background: var(--surface-2); padding: 4px; }
+.flame { position: relative; min-height: 60px; }
+.fn { position: absolute; height: 22px; line-height: 22px; padding: 0 7px; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--flame-text); border-radius: 4px; cursor: pointer;
+  transition: left .42s cubic-bezier(.2, .8, .2, 1), width .42s cubic-bezier(.2, .8, .2, 1), top .42s cubic-bezier(.2, .8, .2, 1), opacity .25s, filter .12s, box-shadow .12s; animation: fadein .35s ease; }
+.fn:hover { filter: brightness(1.1) saturate(1.15); z-index: 1; }
+.fn.dim { opacity: .22; }
+.fn.hit { box-shadow: inset 0 0 0 2px var(--fg); opacity: 1; }
+.fn.same { box-shadow: inset 0 0 0 1.5px var(--fg); }
+.fn.sel { box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); z-index: 2; }
+.fn.coll { font-style: italic; }
+.fn.outside { background-image: repeating-linear-gradient(135deg, transparent 0 7px, rgba(255, 255, 255, .13) 7px 14px); }
+.fn.gone { opacity: 0 !important; pointer-events: none; }
+@keyframes fadein { from { opacity: 0; } }
+.legend { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; font-size: 12px; }
+.legend button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 3px 8px; cursor: pointer; color: var(--muted); }
+.legend button:hover { background: var(--surface-2); color: var(--fg); }
+.legend button[aria-pressed="true"] { border-color: var(--line-2); color: var(--fg); background: var(--surface-2); }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.hintline { font-size: 12px; color: var(--faint); margin-top: 6px; }
+.matchinfo { font-size: 12px; color: var(--muted); }
+
+/* tables */
+.tscroll { overflow: auto; max-height: 600px; border-radius: 12px; border: 1px solid var(--line); }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
-th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); padding: 4px 10px 4px 0; white-space: nowrap; }
-td { border-bottom: 1px solid var(--line); padding: 5px 10px 5px 0; vertical-align: top; }
+th { position: sticky; top: 0; background: var(--surface); text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); padding: 8px 12px; white-space: nowrap; z-index: 1; }
+th.sort { cursor: pointer; user-select: none; } th.sort:hover { color: var(--fg); }
+td { border-bottom: 1px solid var(--line); padding: 7px 12px; vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
 td.n, th.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-tr.pick { cursor: pointer; }
-tr.pick:hover td { background: var(--card); }
-tr.sel td { background: var(--card); }
-.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
-.tab { border: 1px solid var(--line); background: transparent; color: var(--fg); border-radius: 6px; padding: 3px 10px; font: inherit; font-size: 12.5px; cursor: pointer; }
-.tab[aria-selected="true"] { border-color: var(--fg); font-weight: 600; }
-.tab i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
-.flame { position: relative; width: 100%; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; }
-.fr { position: absolute; height: 19px; padding: 0 4px; font-size: 11.5px; line-height: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      color: var(--flame-fg); border-right: 1px solid var(--bg); border-bottom: 1px solid var(--bg); cursor: pointer; }
-.fr.dim { opacity: .55; }
-.tip { position: fixed; pointer-events: none; background: var(--tip); color: var(--tipfg); border-radius: 6px; padding: 6px 9px; font-size: 12px; max-width: 460px; z-index: 9; display: none; }
-.verdict { font-size: 20px; font-weight: 700; }
-.verdict.faster { color: var(--good); } .verdict.slower { color: var(--bad); }
-.hot li { margin: 2px 0; }
-.hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
-@media (max-width: 640px) { main { padding: 14px 16px 30px; } .rows { grid-template-columns: 1fr; } .rows dt { margin-top: 6px; } }
+tbody tr { cursor: pointer; transition: background .12s; }
+tbody tr:hover td { background: var(--surface-2); }
+tbody tr.sel td { background: var(--accent-soft); }
+.cellbar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.cellbar .b { width: 70px; height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; flex: none; }
+.cellbar .b i { display: block; height: 100%; border-radius: 3px; transition: width .6s cubic-bezier(.2, .8, .2, 1); }
+.fcell { display: flex; flex-direction: column; min-width: 0; }
+.fcell .nm { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 520px; }
+.fcell .sm { font-size: 11.5px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 520px; }
+
+/* packages */
+.stackbar { display: flex; height: 34px; border-radius: 10px; overflow: hidden; gap: 2px; margin-bottom: 12px; }
+.stackbar button { border: 0; padding: 0 8px; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; transition: flex-grow .6s cubic-bezier(.2, .8, .2, 1), filter .12s; text-align: left; min-width: 3px; }
+.stackbar button:hover { filter: brightness(1.12); }
+
+/* side panel */
+.side { position: sticky; top: 12px; background: var(--surface-2); border-radius: 14px; padding: 14px; min-height: 200px; font-size: 13px; }
+.side h3 { margin: 0 0 2px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 15px; overflow-wrap: anywhere; }
+.side .full { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; color: var(--faint); overflow-wrap: anywhere; margin-bottom: 8px; }
+.side .stat { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+.side .stat div { background: var(--surface); border-radius: 10px; padding: 8px 10px; }
+.side .stat b { display: block; font-size: 18px; letter-spacing: -.01em; }
+.side .stat span { font-size: 11.5px; color: var(--muted); }
+.side h4 { margin: 14px 0 6px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.side ul { list-style: none; margin: 0; padding: 0; }
+.side li button { width: 100%; display: flex; align-items: center; gap: 8px; border: 0; background: transparent; padding: 4px 6px; border-radius: 7px; cursor: pointer; text-align: left; }
+.side li button:hover { background: var(--surface); }
+.side li .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.side li .p { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.side .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.minibar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--surface-3); margin: 6px 0 2px; }
+.minibar i { display: block; height: 100%; }
+
+/* lists: pods, processes, diff */
+.list { display: flex; flex-direction: column; gap: 6px; }
+.item { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(120px, 1fr) minmax(0, 2fr); gap: 14px; align-items: center; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); cursor: pointer; transition: background .12s, border-color .12s, transform .12s; text-align: left; background: var(--surface); width: 100%; }
+.item:hover { background: var(--surface-2); transform: translateY(-1px); }
+.item[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.item .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .sm { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .why { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.sbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--surface-3); }
+.sbar i { display: block; height: 100%; transition: width .8s cubic-bezier(.2, .8, .2, 1); }
+.nested { margin-top: 14px; animation: rise .35s ease; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+.verdict-ico { width: 132px; height: 132px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+.verdict-ico svg { width: 56px; height: 56px; }
+.dv { display: grid; grid-template-columns: 1fr 1fr; align-items: center; height: 16px; }
+.dv .l { display: flex; justify-content: flex-end; } .dv .r { display: flex; }
+.dv span { white-space: nowrap; }
+.dv i { display: block; height: 10px; border-radius: 3px; transition: width .8s cubic-bezier(.2, .8, .2, 1); }
+.twin { display: flex; flex-direction: column; gap: 3px; min-width: 120px; }
+.twin i { display: block; height: 7px; border-radius: 3px; transition: width .8s cubic-bezier(.2, .8, .2, 1); }
+
+/* waiting, toast, tooltip */
+.waiting { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 60px 16px; text-align: center; color: var(--muted); }
+.radar { width: 74px; height: 74px; border-radius: 50%; position: relative; background: radial-gradient(circle, var(--accent) 0 7px, transparent 8px); }
+.radar::before, .radar::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--accent); animation: ping 1.8s cubic-bezier(.2, .6, .4, 1) infinite; opacity: 0; }
+.radar::after { animation-delay: .9s; }
+@keyframes ping { 0% { transform: scale(.2); opacity: .9; } 100% { transform: scale(1.25); opacity: 0; } }
+.progress { width: min(320px, 80%); height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.progress i { display: block; height: 100%; width: 0; background: var(--accent); }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 20px); background: var(--tip); color: var(--tipfg); padding: 9px 16px; border-radius: 12px; font-size: 13px; opacity: 0; transition: opacity .2s, transform .25s; pointer-events: none; z-index: 20; box-shadow: 0 8px 30px rgba(0, 0, 0, .25); }
+.toast.on { opacity: 1; transform: translate(-50%, 0); }
+.tip { position: fixed; pointer-events: none; background: var(--tip); color: var(--tipfg); border-radius: 10px; padding: 9px 11px; font-size: 12px; max-width: 440px; z-index: 30; display: none; box-shadow: 0 10px 30px rgba(0, 0, 0, .3); line-height: 1.45; }
+.tip .t1 { font-weight: 700; font-size: 13px; overflow-wrap: anywhere; }
+.tip .t2 { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; opacity: .7; overflow-wrap: anywhere; margin-top: 2px; }
+.tip .t3 { opacity: .85; margin-top: 4px; }
+.tip .tb { display: inline-block; font-size: 10.5px; font-weight: 700; border-radius: 999px; padding: 0 6px; margin-right: 4px; background: rgba(127, 127, 127, .25); }
+.tip .th { opacity: .55; margin-top: 5px; font-size: 11px; }
+canvas.confetti { position: fixed; inset: 0; pointer-events: none; z-index: 40; }
+.foot { margin-top: 22px; font-size: 12px; color: var(--faint); text-align: center; }
+.empty { color: var(--muted); padding: 24px; text-align: center; }
+
+@media (max-width: 900px) {
+  .row, .ex { grid-template-columns: minmax(0, 1fr); }
+  .side { position: static; }
+}
+@media (max-width: 640px) {
+  .hero { grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 14px; }
+  .headline { font-size: 21px; }
+  .card { padding: 14px; border-radius: 14px; }
+  .item { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .search { max-width: none; }
+  .facts { grid-template-columns: minmax(0, 1fr); } .facts dt { margin-top: 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
 </style>
 </head>
 <body>
-<main id="app"><p class="muted">Waiting for wits…</p></main>
-<div class="tip" id="tip"></div>
+<div class="wrap" id="app"><div class="waiting"><div class="radar"></div><div>Waiting for wits…</div></div></div>
+<div class="tip" id="tip" role="tooltip"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script id="wits-data" type="application/json">__WITS_DATA__</script>
 <script>
 "use strict";
-const HUE = { "cpu": 24, "cpu-wait": 45, "disk": 210, "memory": 0, "lock": 268, "peer": 158, "idle": 220 };
-const SAT = { "idle": 10 };
-const ORDER = ["cpu", "cpu-wait", "disk", "memory", "lock", "peer"];
-const NAMES = { "cpu": "on CPU", "cpu-wait": "waiting for a CPU", "disk": "disk", "memory": "memory", "lock": "lock", "peer": "another process / network", "idle": "idle (not counted)" };
+// ---------------------------------------------------------------- constants
+const CAUSES = ["cpu", "cpu-wait", "disk", "memory", "lock", "peer", "idle"];
+const HUE = { cpu: 22, "cpu-wait": 42, disk: 213, memory: 338, lock: 262, peer: 168, idle: 218 };
+const SAT = { idle: 14 };
+const NAME = { cpu: "on CPU", "cpu-wait": "waiting for a CPU", disk: "disk", memory: "memory", lock: "locks", peer: "other processes", idle: "idle" };
+const SHORT = { cpu: "CPU", "cpu-wait": "CPU wait", disk: "disk", memory: "memory", lock: "lock", peer: "peer", idle: "idle" };
+const KIND = { app: "your code", lib: "libraries", std: "standard library", sys: "system (libc)", kernel: "kernel", unknown: "unknown" };
+const ADVICE = {
+  cpu: ["It is computing. Nothing outside the process is holding it back.", "Make the hot code below do less: a better algorithm, fewer allocations and copies, caching, or work done once instead of on every request."],
+  "cpu-wait": ["It is ready to run but has to wait for a free CPU.", "If the blame is a cgroup limit, raise the CPU limit or lower the parallelism. If it is another process, that process is using the CPUs."],
+  disk: ["It is waiting for storage.", "Look for an fsync or a small write per operation in the code below. Batch writes, fsync less often, or move the file to faster storage."],
+  memory: ["It is waiting for memory: pages are being swapped out or reclaimed.", "Raise the memory limit or use less memory. The blame says who is using it."],
+  lock: ["Its threads are queued on a lock.", "Hold the lock for less time, split it, or stop sharing the data. The blame names the holder: ask wits about it next."],
+  peer: ["It is waiting for another process or the network.", "The delay is on the other side. Follow the blame: wits can explain that process too."],
+  idle: ["It is not slow: it has nothing to do.", "It is waiting for input, a timer or new work. If something should be happening, check what it waits for."],
+};
 const app = document.getElementById("app");
 const tip = document.getElementById("tip");
+const motion = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+const ICON = {
+  logo: '<svg viewBox="0 0 24 24" fill="none"><circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="2.2"/><path d="M15.5 15.5 20 20" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M7.5 11.5l2-3 2 4 1.5-2" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  spark: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9zM19 15l.9 2.1 2.1.9-2.1.9L19 21l-.9-2.1-2.1-.9 2.1-.9z"/></svg>',
+  again: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>',
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>',
+  theme: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
+  zoom: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+  down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M5 13l7 7 7-7"/></svg>',
+  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V4M5 11l7-7 7 7"/></svg>',
+  same: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 9h14M5 15h14"/></svg>',
+};
 
-function color(cause, k) {
-  const h = HUE[cause] ?? 220, s = SAT[cause] ?? 62;
-  const light = getComputedStyle(document.documentElement).getPropertyValue("--flame-l").trim() || "72%";
-  const base = parseFloat(light);
-  return `hsl(${h + (k % 7) * 3 - 9} ${s}% ${base + ((k * 37) % 13) - 6}%)`;
-}
-function solid(cause) { return `hsl(${HUE[cause] ?? 220} ${SAT[cause] ?? 62}% 55%)`; }
+// ---------------------------------------------------------------- helpers
 function el(tag, attrs, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
-    if (k === "class") e.className = v; else if (k === "style") e.style.cssText = v;
-    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+    if (k === "class") e.className = v;
+    else if (k === "style") e.style.cssText = v;
+    else if (k === "html") e.innerHTML = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v === true ? "" : v);
   }
-  for (const c of kids.flat()) if (c != null && c !== false) e.append(c instanceof Node ? c : String(c));
+  for (const c of kids.flat(Infinity)) if (c != null && c !== false) e.append(c instanceof Node ? c : String(c));
   return e;
 }
-function pct(x) { return x == null ? "" : (x >= 0.995 ? "100%" : x < 0.005 && x > 0 ? "<1%" : Math.round(x * 100) + "%"); }
+// replaceChildren that flattens nested lists and drops null and false
+function put(node, ...kids) {
+  node.replaceChildren();
+  for (const c of kids.flat(Infinity)) if (c != null && c !== false) node.append(c instanceof Node ? c : String(c));
+  return node;
+}
+function svgEl(tag, attrs) {
+  const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  return e;
+}
+function icon(name) { return el("span", { style: "display:inline-flex", html: ICON[name] }); }
+function pct(x) { return x == null || isNaN(x) ? "" : x >= 0.995 ? "100%" : x > 0 && x < 0.005 ? "<1%" : Math.round(x * 100) + "%"; }
 function secs(s) {
   if (s == null || isNaN(s)) return "";
   if (s === 0) return "0";
-  if (s >= 10) return s.toFixed(0) + "s";
-  if (s >= 0.1) return s.toFixed(1) + "s";
-  if (s >= 0.001) return (s * 1000).toFixed(0) + "ms";
-  return (s * 1e6).toFixed(0) + "µs";
+  const a = Math.abs(s);
+  if (a >= 100) return s.toFixed(0) + " s";
+  if (a >= 10) return s.toFixed(1).replace(/\.0$/, "") + " s";
+  if (a >= 0.1) return s.toFixed(2).replace(/0$/, "") + " s";
+  if (a >= 0.001) return (s * 1000).toFixed(0) + " ms";
+  return (s * 1e6).toFixed(0) + " µs";
 }
-function ms(v) { return v == null ? "" : secs(v / 1000); }
-function usec(v) { return v == null ? "" : secs(v / 1e6); }
-function shortPath(p) { if (!p) return p; const a = p.split("/").filter(Boolean); return a.length > 3 ? "…/" + a.slice(-3).join("/") : p; }
-function frameLabel(f) {
-  if (!f) return "";
-  if (f.file) return `${f.func} (${shortPath(f.file)}${f.line ? ":" + f.line : ""})`;
-  return f.module ? `${f.func} (${f.module})` : f.func;
+const usec = v => secs(v / 1e6), msec = v => secs(v / 1000);
+function shortPath(p) { if (!p) return ""; const a = String(p).split("/").filter(Boolean); return a.length > 3 ? "…/" + a.slice(-3).join("/") : p; }
+function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function causeColor(c, l = 55) { return `hsl(${HUE[c] ?? 220} ${SAT[c] ?? 80}% ${l}%)`; }
+function flameL() { return parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--flame-l")) || 70; }
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("on");
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("on"), 2200);
+}
+async function copyText(text, what) {
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; } catch (_) {
+    const ta = el("textarea", { style: "position:fixed;opacity:0" }); ta.value = text; document.body.append(ta); ta.select();
+    try { ok = document.execCommand("copy"); } catch (_) {} ta.remove();
+  }
+  toast(ok ? `Copied ${what || ""}`.trim() : "Could not copy: select the text instead");
+}
+function countUp(node, to, fmt) {
+  if (!motion || !isFinite(to)) { node.textContent = fmt(to); return; }
+  const t0 = performance.now(), d = 700;
+  (function step(t) { const k = Math.min(1, (t - t0) / d), e = 1 - Math.pow(1 - k, 3); node.textContent = fmt(to * e); if (k < 1) requestAnimationFrame(step); })(t0);
+}
+// "TcpStream::write_vectored" for "<&std::net::tcp::TcpStream as std::io::Write>::write_vectored"
+function shortName(n) {
+  if (!n) return "";
+  if (n === "[unknown]") return n;
+  let s = n;
+  for (let guard = 0; s.startsWith("<") && guard < 5; guard++) {
+    let d = 0, end = -1;
+    for (let i = 0; i < s.length; i++) { if (s[i] === "<") d++; else if (s[i] === ">") { d--; if (!d) { end = i; break; } } }
+    if (end < 0) break;
+    let inner = s.slice(1, end).replace(/^&(mut )?/, "").replace(/^dyn /, "");
+    const as = inner.indexOf(" as ");
+    if (as >= 0) inner = (inner.slice(0, as).includes("::") || !/^[A-Z]/.test(inner)) ? inner.slice(0, as) : inner.slice(as + 4);
+    s = inner + s.slice(end + 1);
+  }
+  let out = "", d = 0;
+  for (const ch of s) { if (ch === "<") d++; else if (ch === ">" && d) d--; else if (!d) out += ch; }
+  if (/^L[\w/$]+;::/.test(out)) out = out.slice(1).replace(";", "");
+  if (out.includes("::")) {
+    const parts = out.split("::").filter(p => p && !p.startsWith("{{"));
+    const tail = parts.slice(-2);
+    if (tail.length === 2 && /^[\w.$]+$/.test(tail[0]) && tail[0].includes(".")) tail[0] = tail[0].split(".").pop();
+    return tail.join("::") || out;
+  }
+  return out.includes("/") ? out.slice(out.lastIndexOf("/") + 1) : out;
+}
+function frameKind(f) { return f.kind || (f.kernel ? "kernel" : f.func === "[unknown]" ? "unknown" : "app"); }
+function pkgOf(f) {
+  const k = frameKind(f);
+  if (k === "lib") return f.pkg || f.package || f.module || "library";
+  if (k === "unknown") return f.module && !f.module.startsWith("[") ? f.module : "unknown code";
+  return KIND[k];
+}
+function fnKey(func, module) { return func + "\u0000" + (module || ""); }
+function where(f) { return f?.file ? shortPath(f.file) + (f.line ? ":" + f.line : "") : ""; }
+function fullWhere(f) { return f?.file ? f.file + (f.line ? ":" + f.line : "") : ""; }
+
+// ---------------------------------------------------------------- MCP host bridge (MCP Apps)
+const host = { on: false, caps: {}, ctx: {}, args: null, request: null };
+const pages = [];
+let current = null;
+function show(d, push) {
+  if (push && current) pages.push(current);
+  current = d;
+  render(d);
+  window.scrollTo({ top: 0, behavior: motion ? "smooth" : "auto" });
+}
+async function callTool(name, args) {
+  if (!host.on) return null;
+  const m = await host.request("tools/call", { name, arguments: args });
+  if (m.error) { toast(m.error.message || "the host refused"); return null; }
+  const r = m.result || {};
+  let d = r.structuredContent;
+  if (!d) { try { d = JSON.parse((r.content || []).find(c => c.type === "text")?.text || ""); } catch (_) {} }
+  if (r.isError || !d) { toast((r.content || []).map(c => c.text).join(" ").slice(0, 160) || "wits failed"); return null; }
+  return d;
+}
+async function lookAt(target, label) {
+  if (!host.on) { copyText(`sudo wits ${target}`, "the command"); return; }
+  waiting(`Watching ${label || target}…`, 2);
+  const d = await callTool("wits_profile", { target: String(target) });
+  if (d) show(d, true); else render(current);
+}
+async function askAgent(text) {
+  if (host.on) {
+    const m = await host.request("ui/message", { role: "user", content: { type: "text", text } });
+    if (!m.error) { toast("Sent to the conversation"); return; }
+  }
+  copyText(text, "a prompt: paste it into your coding agent");
 }
 
-// ---- pieces ----
-function breakdown(bd, idle) {
-  const parts = ORDER.filter(c => (bd?.[c] ?? 0) > 0.004).map(c => [c, bd[c]]);
-  if (!parts.length) return null;
-  return el("div", {},
-    el("div", { class: "bar", role: "img", "aria-label": parts.map(([c, v]) => `${c} ${pct(v)}`).join(", ") },
-      parts.map(([c, v]) => el("span", { style: `width:${v * 100}%;background:${solid(c)}`, title: `${c} ${pct(v)}` }))),
-    el("div", { class: "legend" }, parts.map(([c, v]) => el("span", {}, el("i", { style: `background:${solid(c)}` }), `${c} ${pct(v)}`)),
-      idle > 0.004 ? el("span", {}, `idle ${pct(idle)} of the time, not counted`) : null));
+// ---------------------------------------------------------------- shared pieces
+function header(kindLabel, d) {
+  const themeBtn = el("button", { class: "btn ghost", title: "Theme", "aria-label": "Switch theme", onclick: () => {
+    const r = document.documentElement, cur = r.dataset.theme;
+    const dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    r.dataset.theme = dark ? "light" : "dark";
+    try { localStorage.setItem("wits-theme", r.dataset.theme); } catch (_) {}
+    window.dispatchEvent(new Event("wits-theme"));
+  } }, icon("theme"));
+  return el("div", { class: "top" },
+    pages.length ? el("button", { class: "btn ghost", onclick: () => { current = pages.pop(); render(current); } }, icon("back"), "Back") : null,
+    el("div", { class: "brand" }, el("span", { style: "display:inline-flex", html: ICON.logo }), "wits"),
+    el("span", { class: "kindtag" }, kindLabel),
+    el("div", { class: "spacer" }),
+    host.on && d ? el("button", { class: "btn ghost", title: "Watch again", onclick: () => again(d) }, icon("again"), "Look again") : null,
+    themeBtn);
 }
-function upstream(b, depth) {
-  const u = b?.upstream;
-  if (!u || !u.answer || depth > 3) return null;
-  const a = u.answer;
-  return el("div", { class: "up" },
-    el("div", { class: "sum" }, a.summary || ""),
-    el("dl", { class: "rows" },
-      a.what ? [el("dt", {}, "what"), el("dd", {}, a.what)] : null,
-      a.where ? [el("dt", {}, "where"), el("dd", { class: "mono" }, a.where)] : null,
-      a.blame?.text ? [el("dt", {}, "blame"), el("dd", {}, a.blame.text)] : null),
-    el("div", { class: "hint" }, `answered by the wits agent on node ${u.node}`),
-    upstream(a.blame, depth + 1));
+async function again(d) {
+  let name, args;
+  if (d.kind === "run") { name = "wits_run"; args = host.args?.command ? host.args : { command: d.command }; }
+  else if (d.kind === "diff") { name = "wits_diff"; args = host.args; }
+  else if (d.kind === "group") { name = "wits_explain"; args = { targets: d.targets }; }
+  else if (d.pid != null) { name = d.flame ? "wits_profile" : "wits_explain"; args = { target: String(d.pid), seconds: d.window_ms ? d.window_ms / 1000 : undefined }; }
+  else { name = "wits_overview"; args = {}; }
+  if (!args) { toast("Nothing to repeat"); return; }
+  waiting("Watching again…", args.seconds || 2);
+  const r = await callTool(name, args);
+  if (r) show(r, false); else render(current);
 }
-function hotList(code) {
-  if (!code?.causes?.length) return null;
-  return el("div", {}, code.causes.map(c => el("div", { class: "card" },
-    el("div", {}, el("b", {}, c.cause), " ", el("span", { class: "muted" }, secs(c.seconds))),
-    el("ul", { class: "hot" }, (c.hot || []).slice(0, 8).map(h => el("li", {},
-      el("span", { class: "mono" }, pct(h.share), "  ", frameLabel(h.frame)),
-      h.leaf ? el("span", { class: "muted" }, " in ", h.leaf.func) : null,
-      (h.callers || []).length ? el("div", { class: "muted mono" }, "← ", h.callers.map(frameLabel).join(" ← ")) : null))))));
+function donut(parts, center, onPick, size = 168) {
+  const r = 64, C = 2 * Math.PI * r, w = 16;
+  const s = svgEl("svg", { viewBox: "0 0 168 168", width: size, height: size });
+  const g = svgEl("g", { transform: "rotate(-90 84 84)" });
+  g.append(svgEl("circle", { cx: 84, cy: 84, r, fill: "none", stroke: "var(--surface-3)", "stroke-width": w }));
+  const total = parts.reduce((a, p) => a + p[1], 0) || 1;
+  let off = 0;
+  for (const [c, v] of parts) {
+    const len = v / total * C;
+    const seg = svgEl("circle", { cx: 84, cy: 84, r, fill: "none", stroke: causeColor(c), "stroke-width": w, "stroke-dasharray": `0 ${C}`, "stroke-dashoffset": -off, class: "seg" });
+    const t = svgEl("title", {}); t.textContent = `${NAME[c] || c}: ${pct(v / total)}${onPick ? " (click to explore)" : ""}`; seg.append(t);
+    if (onPick) seg.addEventListener("click", () => onPick(c));
+    const L = Math.max(0, len - (parts.length > 1 ? 2 : 0));
+    if (motion) requestAnimationFrame(() => requestAnimationFrame(() => seg.setAttribute("stroke-dasharray", `${L} ${C}`)));
+    else seg.setAttribute("stroke-dasharray", `${L} ${C}`);
+    g.append(seg);
+    off += len;
+  }
+  s.append(g);
+  return el("div", { class: "donut", style: `width:${size}px;height:${size}px` }, s, el("div", { class: "center" }, center));
+}
+function stackBar(bd) {
+  const parts = CAUSES.filter(c => c !== "idle" && (bd?.[c] || 0) > 0.003);
+  const b = el("div", { class: "sbar" });
+  for (const c of parts) {
+    const i = el("i", { style: `width:0;background:${causeColor(c)}`, title: `${NAME[c]} ${pct(bd[c])}` });
+    b.append(i);
+    requestAnimationFrame(() => requestAnimationFrame(() => { i.style.width = bd[c] * 100 + "%"; }));
+  }
+  return b;
+}
+function causePill(c, text, pressed, onclick) {
+  return el("button", { class: "pill", style: `--c:${causeColor(c)}`, "aria-pressed": pressed == null ? null : String(pressed), onclick }, el("span", { class: "dot" }), text);
+}
+function splitSummary(a) {
+  const s = a.summary || "";
+  const i = s.indexOf(") is ");
+  if (i < 0) return { head: s, tail: "" };
+  const rest = s.slice(i + 2);
+  const j = rest.indexOf(": ");
+  return j < 0 ? { head: rest, tail: "" } : { head: rest.slice(0, j), tail: rest.slice(j + 2) };
+}
+function kindBadge(f) {
+  const k = frameKind(f);
+  const label = k === "lib" ? pkgOf(f) : KIND[k];
+  return el("span", { class: "badge" + (k === "app" ? " app" : "") }, label);
 }
 
-// ---- the flame graph: one per cause, root at the top ----
-function flameGraph(fl, onlyCause) {
+// ---------------------------------------------------------------- the stacks model
+function model(fl) {
   if (!fl || !fl.stacks?.length) return null;
-  const frames = fl.frames.map(f => ({ func: f[0], module: f[1], file: f[2], line: f[3], kernel: f[4] }));
-  const roots = {};
-  for (const [cause, pid, us, ids] of fl.stacks) {
-    if (onlyCause && cause !== onlyCause) continue;
-    const r = roots[cause] ??= { name: NAMES[cause] || cause, us: 0, kids: new Map(), cause };
-    r.us += us;
-    const pname = `${fl.procs?.[pid] || "?"} (${pid})`;
-    let n = r;
-    for (const key of ["p" + pid, ...ids]) {
-      let k = n.kids.get(key);
-      if (!k) {
-        const f = typeof key === "number" ? frames[key] : null;
-        k = { name: f ? f.func + (f.kernel ? " [k]" : "") : pname, frame: f, us: 0, kids: new Map(), cause };
-        n.kids.set(key, k);
+  const frames = fl.frames.map((f, i) => {
+    const [func, module, file, line, kernel, kind, pkg] = f;
+    const fr = { i, func, module, file, line, kernel, kind: kind || null, pkg: pkg || null };
+    fr.kind = frameKind(fr);
+    fr.name = func === "[unknown]" ? (module ? `[${module}]` : "[unknown]") : shortName(func) + (kernel ? " ⌁" : "");
+    fr.fn = fnKey(func, module);
+    fr.pk = pkgOf(fr);
+    return fr;
+  });
+  const stacks = fl.stacks.map(([cause, pid, us, ids]) => ({ cause, pid, us, ids }));
+  const totals = {};
+  for (const s of stacks) totals[s.cause] = (totals[s.cause] || 0) + s.us;
+  return { frames, stacks, totals, procs: fl.procs || {}, source: fl.source, hasApp: frames.some(f => f.kind === "app") };
+}
+
+// ---------------------------------------------------------------- the explorer
+let activeEx = null;
+function explorer(M, opts = {}) {
+  const F = M.frames;
+  const present = CAUSES.filter(c => M.totals[c] > 0);
+  const st = {
+    causes: new Set(present.filter(c => c !== "idle")), pids: null, pidLabel: "", pkg: null, kindHi: null,
+    mine: M.hasApp, view: "flame", q: "", sel: null, focus: "", sort: "self", hover: null,
+  };
+  if (!st.causes.size) st.causes = new Set(present);
+  if (opts.cause && present.includes(opts.cause)) st.causes = new Set([opts.cause]);
+  let stacks = [], tree = null, index = new Map();
+  const ids = new Map();
+  const segId = k => { let v = ids.get(k); if (v == null) { v = ids.size; ids.set(k, v); } return v; };
+
+  const root = el("div", {});
+  const toolbar = el("div", { class: "toolbar" });
+  const filters = el("div", { class: "filters" });
+  const mainCol = el("div", { style: "min-width:0" });
+  const side = el("aside", { class: "side" });
+  root.append(toolbar, filters, el("div", { class: "ex" }, mainCol, side));
+
+  function filtered() {
+    return M.stacks.filter(s => st.causes.has(s.cause) && (!st.pids || st.pids.has(s.pid)) &&
+      (!st.pkg || s.ids.some(i => F[i].pk === st.pkg)));
+  }
+  function mineSegs(sids) {
+    const out = [];
+    let run = [];
+    const flush = trailing => {
+      const user = run.filter(i => !F[i].kernel);
+      if (!user.length) return;
+      const e = F[user[0]];
+      const pk = [...new Set(user.map(i => F[i].pk))];
+      out.push({ key: "r" + e.fn, frame: e, kind: e.kind, label: e.name + (user.length > 1 ? " …" : ""), hidden: user.length - 1, pkgs: pk });
+      if (trailing && user.length > 1) { const l = F[user[user.length - 1]]; out.push({ key: "f" + l.fn, frame: l, kind: l.kind }); }
+    };
+    for (const i of sids) {
+      if (F[i].kind === "app") { if (run.length && out.length) flush(false); run = []; out.push({ key: "f" + F[i].fn, frame: F[i], kind: "app" }); }
+      else run.push(i);
+    }
+    if (run.length) {
+      if (out.length) flush(true);
+      else {
+        const user = run.filter(i => !F[i].kernel);
+        const pk = [...new Set(user.map(i => F[i].pk))];
+        const show = pk.filter(p => p !== KIND.std && p !== KIND.sys).slice(0, 2);
+        out.push({ key: "x" + show.join(","), label: "not your code" + (show.length ? ": " + show.join(", ") : ""), kind: "outside", pkgs: pk, hidden: user.length });
+        const l = F[user[user.length - 1]];
+        if (l) out.push({ key: "f" + l.fn, frame: l, kind: l.kind });
       }
-      k.us += us;
-      n = k;
+    }
+    return out;
+  }
+  function build() {
+    stacks = filtered();
+    index = new Map();
+    const multi = new Set(stacks.map(s => s.pid)).size > 1;
+    const r = { pk: "", label: "everything shown", kind: "root", us: 0, self: 0, by: {}, kids: new Map(), parent: null, depth: 0 };
+    index.set("", r);
+    for (const s of stacks) {
+      let n = r;
+      n.us += s.us; n.by[s.cause] = (n.by[s.cause] || 0) + s.us;
+      const segs = st.mine ? mineSegs(s.ids) : s.ids.map(i => ({ key: "f" + F[i].fn, frame: F[i], kind: F[i].kind }));
+      if (multi) segs.unshift({ key: "p" + s.pid, label: `${M.procs[s.pid] || "process"} (${s.pid})`, kind: "proc", pid: s.pid });
+      for (const g of segs) {
+        let k = n.kids.get(g.key);
+        if (!k) {
+          k = { pk: n.pk + "." + segId(g.key), label: g.label ?? g.frame?.name ?? "?", frame: g.frame || null, kind: g.kind, pkgs: g.pkgs, hidden: g.hidden || 0, pid: g.pid,
+            us: 0, self: 0, by: {}, kids: new Map(), parent: n, depth: n.depth + 1 };
+          n.kids.set(g.key, k); index.set(k.pk, k);
+        }
+        n = k;
+        n.us += s.us; n.by[s.cause] = (n.by[s.cause] || 0) + s.us;
+      }
+      n.self += s.us;
+    }
+    const cs = [...st.causes];
+    r.label = cs.length === 1 ? `all ${NAME[cs[0]]} time` : "all time shown";
+    tree = r;
+    if (!index.has(st.focus)) st.focus = "";
+  }
+  function domCause(n) { let b = null, v = -1; for (const [c, x] of Object.entries(n.by)) if (x > v) { v = x; b = c; } return b || "cpu"; }
+  function color(n) {
+    const L = flameL(), h = hash(n.frame?.fn || n.label), j = (h % 9) - 4;
+    switch (n.kind) {
+      case "app": { const c = domCause(n); return `hsl(${HUE[c] + (h >> 4) % 12 - 6} ${c === "idle" ? 16 : 82}% ${L - 4 + j}%)`; }
+      case "lib": return `hsl(${200 + hash(n.frame?.pk || "") % 50} 46% ${L + j}%)`;
+      case "std": return `hsl(222 16% ${L + 2 + j}%)`;
+      case "sys": return `hsl(222 10% ${L - 6 + j}%)`;
+      case "kernel": return `hsl(252 14% ${L - 10 + j}%)`;
+      case "outside": return `hsl(222 12% ${L - 2}%)`;
+      case "proc": return `hsl(230 22% ${L - 12}%)`;
+      case "root": return `hsl(230 14% ${L - 16}%)`;
+      default: return `hsl(0 0% ${L}%)`;
     }
   }
-  const causes = Object.keys(roots).sort((a, b) => (a === "idle") - (b === "idle") || roots[b].us - roots[a].us);
-  if (!causes.length) return null;
-  const total = causes.filter(c => c !== "idle").reduce((s, c) => s + roots[c].us, 0);
-  const box = el("div", {});
-  const tabs = el("div", { class: "tabs", role: "tablist" });
-  const view = el("div", { class: "flame" });
-  const hint = el("div", { class: "hint" }, "Click a frame to zoom in, the top bar to zoom out. Width is time.");
-  let cur = causes[0], path = [];
-  function draw() {
-    tabs.replaceChildren(...causes.map(c => el("button", {
-      class: "tab", role: "tab", "aria-selected": String(c === cur),
-      onclick: () => { cur = c; path = []; draw(); }
-    }, el("i", { style: `background:${solid(c)}` }), `${c} ${usec(roots[c].us)}`)));
-    const root = roots[cur];
-    const focus = path.length ? path[path.length - 1] : root;
+  function matches(n) {
+    const q = st.q;
+    if (q) {
+      const f = n.frame;
+      return (n.label || "").toLowerCase().includes(q) || (f && (f.func.toLowerCase().includes(q) || (f.file || "").toLowerCase().includes(q) || (f.pk || "").toLowerCase().includes(q)));
+    }
+    if (st.kindHi) return n.kind === st.kindHi || (n.kind === "lib" && st.kindHi === "lib");
+    return true;
+  }
+
+  // ---- toolbar
+  function renderToolbar() {
+    const causeBtns = present.map(c => causePill(c, [SHORT[c], " ", el("span", { class: "t" }, usec(M.totals[c]))], st.causes.has(c), ev => {
+      if (ev.altKey || ev.metaKey || ev.shiftKey) st.causes = new Set([c]);
+      else if (st.causes.has(c)) { if (st.causes.size > 1) st.causes.delete(c); else st.causes = new Set(present.filter(x => x !== c)); }
+      else st.causes.add(c);
+      update();
+    }));
+    causeBtns.forEach(b => b.title = "Click to show or hide; shift-click to show only this");
+    const views = el("div", { class: "seg", role: "group", "aria-label": "View" },
+      [["flame", "Flame graph"], ["top", "Top functions"], ["pkg", "By package"]].map(([v, t]) =>
+        el("button", { "aria-pressed": String(st.view === v), onclick: () => { st.view = v; renderToolbar(); renderMain(); } }, t)));
+    const mine = M.hasApp ? el("button", { class: "switch", role: "switch", "aria-checked": String(st.mine), title: "Hide the standard library, dependencies and the kernel between your functions (m)",
+      onclick: () => { st.mine = !st.mine; update(); } }, el("span", { class: "track" }), "Only my code") : null;
+    const input = el("input", { type: "search", placeholder: "Search functions, files, packages", value: st.q, "aria-label": "Search",
+      oninput: e => { st.q = e.target.value.trim().toLowerCase(); paint(); if (st.view !== "flame") renderMain(); } });
+    put(toolbar, el("div", { class: "pills", style: "margin:0" }, causeBtns), el("div", { class: "spacer" }), mine, views,
+      el("label", { class: "search" }, el("span", { html: ICON.search }), input, st.q ? null : el("kbd", {}, "/")));
+    toolbar._input = input;
+    const f = [];
+    if (st.pids) f.push(el("span", { class: "ftag" }, `process: ${st.pidLabel}`, el("button", { "aria-label": "Clear", onclick: () => { st.pids = null; update(); } }, "×")));
+    if (st.pkg) f.push(el("span", { class: "ftag" }, `through ${st.pkg}`, el("button", { "aria-label": "Clear", onclick: () => { st.pkg = null; update(); } }, "×")));
+    if (st.kindHi) f.push(el("span", { class: "ftag" }, `highlighting ${KIND[st.kindHi]}`, el("button", { "aria-label": "Clear", onclick: () => { st.kindHi = null; renderToolbar(); paint(); } }, "×")));
+    put(filters, ...f);
+  }
+
+  // ---- flame graph, with elements kept across redraws so zooming animates
+  const ROW = 24;
+  const box = el("div", { class: "flame" });
+  const scroller = el("div", { class: "fscroll" }, box);
+  const crumbs = el("div", { class: "crumbs" });
+  const info = el("div", { class: "matchinfo" });
+  const els = new Map();
+  let laid = [];
+  function layoutFlame() {
+    const focus = index.get(st.focus) || tree;
+    const W = Math.max(300, box.clientWidth || 900);
+    const min = 2 / W;
     const rows = [];
-    // ancestors of the focus, full width, to zoom back out
-    const chain = [root, ...path];
-    chain.slice(0, -1).forEach((n, i) => rows.push({ n, x: 0, w: 1, d: i, up: i }));
-    const base = chain.length - 1;
     (function lay(n, x, w, d) {
-      rows.push({ n, x, w, d: base + d });
-      if (d > 120) return;
+      rows.push({ n, x, w, d });
+      if (d > 200) return;
       let cx = x;
-      const kids = [...n.kids.values()].sort((a, b) => b.us - a.us);
-      for (const k of kids) {
-        const kw = w * k.us / n.us;
-        if (kw >= 0.002) lay(k, cx, kw, d + 1);
+      for (const k of [...n.kids.values()].sort((a, b) => b.us - a.us)) {
+        const kw = n.us ? w * k.us / n.us : 0;
+        if (kw >= min) lay(k, cx, kw, d + 1);
         cx += kw;
       }
     })(focus, 0, 1, 0);
-    const depth = rows.reduce((m, r) => Math.max(m, r.d), 0) + 1;
-    view.style.height = depth * 20 + "px";
-    view.replaceChildren(...rows.map(r => {
-      const k = r.n.frame ? (r.n.name.length * 7 + (r.n.frame.module || "").length) : r.d;
-      const e = el("div", {
-        class: "fr" + (r.up != null ? " dim" : ""),
-        style: `left:${r.x * 100}%;width:${r.w * 100}%;top:${r.d * 20}px;background:${color(r.n.cause, k)}`
-      }, r.w > 0.012 ? r.n.name : "");
-      e.addEventListener("mousemove", ev => {
-        const f = r.n.frame;
-        tip.replaceChildren(
-          el("div", {}, el("b", {}, r.n.name)),
-          f?.file ? el("div", { class: "mono" }, `${f.file}${f.line ? ":" + f.line : ""}`) : null,
-          f?.module ? el("div", {}, f.module) : null,
-          el("div", {}, `${usec(r.n.us)} · ${pct(r.n.us / root.us)} of ${cur}` + (total && cur !== "idle" ? ` · ${pct(r.n.us / total)} of all` : "")));
-        tip.style.display = "block";
-        const x = Math.min(ev.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
-        tip.style.left = Math.max(8, x) + "px";
-        tip.style.top = (ev.clientY + 16) + "px";
-      });
-      e.addEventListener("mouseleave", () => { tip.style.display = "none"; });
-      e.addEventListener("click", () => {
-        if (r.up != null) path = path.slice(0, r.up);
-        else if (r.n !== focus) {
-          // the path from the focus down to this frame
-          const want = [];
-          (function find(n, trail) {
-            if (n === r.n) { want.push(...trail); return true; }
-            for (const k of n.kids.values()) if (find(k, [...trail, k])) return true;
-            return false;
-          })(focus, []);
-          path = [...path, ...want];
-        }
-        tip.style.display = "none";
-        draw();
-      });
-      return e;
+    return { rows, W };
+  }
+  function drawFlame() {
+    const { rows, W } = layoutFlame();
+    laid = rows;
+    const seen = new Set();
+    let maxD = 0;
+    for (const r of rows) {
+      const n = r.n;
+      seen.add(n.pk);
+      maxD = Math.max(maxD, r.d);
+      let e = els.get(n.pk);
+      if (!e) { e = el("div", { class: "fn" }); els.set(n.pk, e); box.append(e); }
+      e._n = n;
+      e.style.left = `calc(${r.x * 100}% + 1px)`;
+      e.style.width = `calc(${r.w * 100}% - 2px)`;
+      e.style.top = r.d * ROW + 2 + "px";
+      e.style.background = color(n);
+      const label = n.label;
+      e.textContent = r.w * W > 36 ? label : "";
+      e.classList.toggle("coll", !!n.hidden && n.kind !== "outside");
+      e.classList.toggle("outside", n.kind === "outside");
+      e.classList.remove("gone");
+    }
+    for (const [k, e] of els) if (!seen.has(k)) { els.delete(k); e.classList.add("gone"); setTimeout(() => e.remove(), motion ? 400 : 0); }
+    box.style.height = (maxD + 1) * ROW + 4 + "px";
+    // breadcrumbs
+    const chain = []; for (let n = index.get(st.focus) || tree; n; n = n.parent) chain.unshift(n);
+    put(crumbs, ...chain.flatMap((n, i) => [i ? el("span", { class: "sep" }, "›") : null,
+      el("button", { title: n.frame?.func || n.label, onclick: () => zoom(n) }, i ? n.label : "All")]),
+      chain.length > 1 ? el("span", { class: "sep", style: "margin-left:6px" }, "· Esc to zoom out") : null);
+    paint();
+  }
+  function paint() {
+    if (st.view !== "flame") return;
+    const any = !!(st.q || st.kindHi);
+    let hitUs = 0;
+    for (const e of els.values()) {
+      const n = e._n;
+      const m = any && matches(n);
+      e.classList.toggle("hit", any && m && !!st.q);
+      e.classList.toggle("dim", any && !m);
+      e.classList.toggle("sel", !!st.sel && n.frame?.fn === st.sel);
+      e.classList.toggle("same", !!st.hover && n.frame?.fn === st.hover && st.hover !== st.sel);
+    }
+    if (st.q) {
+      // time in stacks that pass through a match
+      const q = st.q;
+      for (const s of stacks) if (s.ids.some(i => { const f = F[i]; return f.func.toLowerCase().includes(q) || (f.file || "").toLowerCase().includes(q) || f.pk.toLowerCase().includes(q); })) hitUs += s.us;
+      info.textContent = hitUs ? `“${st.q}”: ${pct(hitUs / (tree.us || 1))} of the time shown` : `nothing matches “${st.q}”`;
+    } else info.textContent = "";
+  }
+  function zoom(n) { st.focus = n?.pk || ""; hideTip(); drawFlame(); }
+  box.addEventListener("mousemove", ev => {
+    const e = ev.target.closest(".fn"); if (!e || !e._n) return;
+    const n = e._n;
+    showTip(ev, n);
+    const fn = n.frame?.fn || null;
+    if (fn !== st.hover) { st.hover = fn; paint(); }
+  });
+  box.addEventListener("mouseleave", () => { hideTip(); if (st.hover) { st.hover = null; paint(); } });
+  box.addEventListener("click", ev => {
+    const e = ev.target.closest(".fn"); if (!e || !e._n) return;
+    const n = e._n;
+    const focus = index.get(st.focus) || tree;
+    if (n === focus) zoom(n.parent || tree); else zoom(n);
+    if (n.frame) select(n.frame.fn, false);
+  });
+  function showTip(ev, n) {
+    const f = n.frame, total = tree.us || 1;
+    const multi = Object.keys(n.by).length > 1;
+    put(tip, 
+      el("div", { class: "t1" }, n.label),
+      f && f.func !== n.label ? el("div", { class: "t2" }, f.func) : null,
+      el("div", { class: "t3" },
+        f ? el("span", { class: "tb" }, f.kind === "lib" ? f.pk : KIND[f.kind]) : n.kind === "outside" ? el("span", { class: "tb" }, "outside your code") : null,
+        f?.file ? where(f) : f?.module || ""),
+      n.hidden ? el("div", { class: "t3" }, n.kind === "outside" ? `no function of yours in these stacks; ${n.hidden} frames in ${n.pkgs.join(", ")}` : `+${n.hidden} more frame${n.hidden > 1 ? "s" : ""} inside ${n.pkgs.join(", ")}`) : null,
+      el("div", { class: "t3" }, el("b", {}, usec(n.us)), ` · ${pct(n.us / total)} of what is shown`, n.parent && n.parent.kind !== "root" ? ` · ${pct(n.us / n.parent.us)} of its caller` : ""),
+      multi ? el("div", { class: "minibar", style: "width:160px" }, CAUSES.filter(c => n.by[c]).map(c => el("i", { style: `width:${n.by[c] / n.us * 100}%;background:${causeColor(c)}` }))) : null,
+      el("div", { class: "th" }, (index.get(st.focus) || tree) === n ? "click to zoom out" : "click to zoom in and see its details"));
+    tip.style.display = "block";
+    const x = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 10);
+    const y = ev.clientY + 18 + tip.offsetHeight > innerHeight ? ev.clientY - tip.offsetHeight - 12 : ev.clientY + 18;
+    tip.style.left = Math.max(8, x) + "px"; tip.style.top = Math.max(8, y) + "px";
+  }
+
+  // ---- top functions
+  function topRows() {
+    const m = new Map();
+    const get = f => { let e = m.get(f.fn); if (!e) { e = { f, self: 0, total: 0 }; m.set(f.fn, e); } return e; };
+    for (const s of stacks) {
+      const seen = new Set();
+      for (const i of s.ids) { const f = F[i]; if (st.mine && f.kind !== "app") continue; if (seen.has(f.fn)) continue; seen.add(f.fn); get(f).total += s.us; }
+      let leaf = null;
+      for (let j = s.ids.length - 1; j >= 0; j--) { const f = F[s.ids[j]]; if (!st.mine || f.kind === "app") { leaf = f; break; } }
+      if (leaf) get(leaf).self += s.us;
+    }
+    let rows = [...m.values()];
+    if (st.q) rows = rows.filter(r => r.f.func.toLowerCase().includes(st.q) || (r.f.file || "").toLowerCase().includes(st.q) || r.f.pk.toLowerCase().includes(st.q));
+    rows.sort((a, b) => st.sort === "name" ? a.f.name.localeCompare(b.f.name) : b[st.sort] - a[st.sort] || b.total - a.total);
+    return rows.slice(0, 300);
+  }
+  function bar(v, total, c) {
+    return el("div", { class: "cellbar" }, el("span", {}, pct(v / total)), el("div", { class: "b" }, el("i", { style: `width:${Math.max(0, v / total * 100)}%;background:${c}` })));
+  }
+  function renderTop() {
+    const total = tree.us || 1, rows = topRows();
+    const main = [...st.causes][0];
+    const head = (k, t, cls) => el("th", { class: "sort " + (cls || ""), onclick: () => { st.sort = k; renderMain(); } }, t, st.sort === k ? " ↓" : "");
+    const tbody = el("tbody", {}, rows.map(r => el("tr", { class: r.f.fn === st.sel ? "sel" : "", onclick: () => select(r.f.fn, false), ondblclick: () => { st.view = "flame"; renderToolbar(); renderMain(); zoomToFn(r.f.fn); } },
+      el("td", {}, el("div", { class: "fcell" }, el("span", { class: "nm", title: r.f.func }, r.f.name), el("span", { class: "sm" }, where(r.f) || r.f.module || ""))),
+      el("td", {}, kindBadge(r.f)),
+      el("td", { class: "n" }, bar(r.self, total, r.f.kind === "app" ? causeColor(main) : "var(--faint)")),
+      el("td", { class: "n" }, bar(r.total, total, "var(--accent)")))));
+    return el("div", {},
+      el("div", { class: "tscroll" }, el("table", {},
+        el("thead", {}, el("tr", {}, head("name", "Function"), el("th", {}, "Whose"),
+          head("self", st.mine ? "Self (with the libraries it calls)" : "Self", "n"), head("total", "Total (with callees)", "n"))),
+        rows.length ? tbody : el("tbody", {}, el("tr", {}, el("td", { colspan: 4, class: "empty" }, "Nothing matches."))))),
+      el("div", { class: "hintline" }, "Click a row for its callers, callees and hot lines. Double-click to find it in the flame graph."));
+  }
+
+  // ---- by package
+  function renderPkg() {
+    const total = tree.us || 1;
+    const m = new Map();
+    for (const s of stacks) {
+      // CPU time in the kernel is the kernel's; waiting ends in the kernel's
+      // scheduler, so it belongs to the code that waits.
+      let leaf = F[s.ids[s.ids.length - 1]];
+      if (s.cause !== "cpu") for (let j = s.ids.length - 1; j >= 0; j--) if (!F[s.ids[j]].kernel) { leaf = F[s.ids[j]]; break; }
+      const through = new Set(s.ids.map(i => F[i].pk));
+      for (const p of through) { let e = m.get(p); if (!e) { e = { p, self: 0, total: 0, kind: null }; m.set(p, e); } e.total += s.us; }
+      if (leaf) m.get(leaf.pk).self += s.us;
+    }
+    for (const f of F) { const e = m.get(f.pk); if (e && !e.kind) e.kind = f.kind; }
+    const rows = [...m.values()].sort((a, b) => b.self - a.self || b.total - a.total);
+    const main = [...st.causes][0];
+    const col = e => e.kind === "app" ? causeColor(main) : e.kind === "lib" ? `hsl(${200 + hash(e.p) % 50} 50% 52%)` : e.kind === "kernel" ? "hsl(252 16% 50%)" : e.kind === "sys" ? "hsl(222 10% 50%)" : "hsl(222 16% 60%)";
+    const sb = el("div", { class: "stackbar" });
+    for (const e of rows.filter(e => e.self > 0)) {
+      const b = el("button", { style: `flex-grow:0;flex-basis:0;background:${col(e)}`, title: `${e.p}: ${pct(e.self / total)} spent in its own code. Click to show only stacks through it.`, onclick: () => setPkg(e.p) }, e.self / total > 0.06 ? `${e.p} ${pct(e.self / total)}` : "");
+      sb.append(b);
+      requestAnimationFrame(() => requestAnimationFrame(() => { b.style.flexGrow = e.self; }));
+    }
+    return el("div", {},
+      el("p", { class: "muted", style: "margin:0 0 10px" }, "Whose code the time is spent in. ", el("b", {}, "Self"), " is time in the package's own code; ", el("b", {}, "through"), " counts every stack that passes through it."),
+      sb,
+      el("div", { class: "tscroll" }, el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "Package"), el("th", { class: "n" }, "Self"), el("th", { class: "n" }, "Through"))),
+        el("tbody", {}, rows.map(e => el("tr", { class: st.pkg === e.p ? "sel" : "", onclick: () => setPkg(e.p) },
+          el("td", {}, el("span", { style: `display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:8px;background:${col(e)}` }), e.p,
+            e.kind && e.kind !== "lib" ? el("span", { class: "faint" }, "") : null),
+          el("td", { class: "n" }, bar(e.self, total, col(e))),
+          el("td", { class: "n" }, bar(e.total, total, "var(--accent)"))))))),
+      el("div", { class: "hintline" }, "Click a package to keep only the stacks that pass through it."));
+  }
+  function setPkg(p) { st.pkg = st.pkg === p ? null : p; st.view = "flame"; update(); }
+
+  // ---- side panel
+  function fnStats(fn) {
+    const r = { total: 0, self: 0, by: {}, callers: new Map(), callees: new Map(), lines: new Map(), f: null };
+    for (const s of stacks) {
+      const j = s.ids.findIndex(i => F[i].fn === fn);
+      if (j < 0) continue;
+      const f = F[s.ids[j]];
+      r.f = r.f || f;
+      r.total += s.us; r.by[s.cause] = (r.by[s.cause] || 0) + s.us;
+      if (j === s.ids.length - 1) r.self += s.us;
+      if (f.line) { const k = f.file + ":" + f.line; r.lines.set(k, (r.lines.get(k) || 0) + s.us); }
+      let up = j - 1;
+      if (st.mine) while (up >= 0 && F[s.ids[up]].kind !== "app") up--;
+      if (up < 0) up = j - 1;
+      if (up >= 0) { const c = F[s.ids[up]]; r.callers.set(c.fn, { f: c, us: (r.callers.get(c.fn)?.us || 0) + s.us }); }
+      if (j + 1 < s.ids.length) { const c = F[s.ids[j + 1]]; r.callees.set(c.fn, { f: c, us: (r.callees.get(c.fn)?.us || 0) + s.us }); }
+    }
+    return r;
+  }
+  function renderSide() {
+    if (!st.sel) {
+      put(side, 
+        el("div", { style: "font-weight:650;margin-bottom:6px" }, "Explore"),
+        el("p", { class: "muted", style: "margin:0 0 10px" }, "Width is time. Click any bar or row to zoom in and see who calls it, what it calls and which lines are hot. Hover to light up every place a function appears."),
+        el("div", { style: "font-weight:650;margin:12px 0 4px" }, "Colors: whose code"),
+        legend(),
+        el("p", { class: "faint", style: "margin:12px 0 0;font-size:12px" }, "Keys: / search · m my code · Esc zoom out"));
+      return;
+    }
+    const r = fnStats(st.sel);
+    if (!r.f) { st.sel = null; renderSide(); return; }
+    const f = r.f, total = tree.us || 1;
+    const list = (m) => el("ul", {}, [...m.values()].sort((a, b) => b.us - a.us).slice(0, 7).map(x =>
+      el("li", {}, el("button", { title: x.f.func, onclick: () => select(x.f.fn, true) },
+        el("span", { style: `width:8px;height:8px;border-radius:2px;flex:none;background:${x.f.kind === "app" ? causeColor(domCauseOf(r)) : "var(--faint)"}` }),
+        el("span", { class: "nm" }, x.f.name), el("span", { class: "p" }, pct(x.us / r.total))))));
+    const lines = [...r.lines.entries()].sort((a, b) => b[1] - a[1]);
+    put(side, 
+      el("div", { style: "display:flex;gap:6px;align-items:center;margin-bottom:6px" }, kindBadge(f), el("div", { class: "spacer" }),
+        el("button", { class: "copy", onclick: () => { st.sel = null; renderSide(); paint(); if (st.view !== "flame") renderMain(); } }, "close ×")),
+      el("h3", {}, f.name),
+      f.func !== f.name ? el("div", { class: "full" }, f.func) : null,
+      f.file ? el("div", {}, el("button", { class: "copy", title: "Copy the location", onclick: () => copyText(fullWhere(f), fullWhere(f)) }, where(f), " ⧉")) : el("div", { class: "faint" }, f.module || ""),
+      el("div", { class: "stat" },
+        el("div", {}, el("b", {}, pct(r.total / total)), el("span", {}, `total · ${usec(r.total)}`)),
+        el("div", {}, el("b", {}, pct(r.self / total)), el("span", {}, `in itself · ${usec(r.self)}`))),
+      Object.keys(r.by).length > 1 ? [el("div", { class: "minibar" }, CAUSES.filter(c => r.by[c]).map(c => el("i", { style: `width:${r.by[c] / r.total * 100}%;background:${causeColor(c)}`, title: `${NAME[c]} ${pct(r.by[c] / r.total)}` }))),
+        el("div", { class: "faint", style: "font-size:11.5px" }, CAUSES.filter(c => r.by[c]).map(c => `${SHORT[c]} ${pct(r.by[c] / r.total)}`).join(" · "))] : null,
+      lines.length > 1 ? [el("h4", {}, "Hot lines"), el("ul", {}, lines.slice(0, 5).map(([k, us]) =>
+        el("li", {}, el("button", { onclick: () => copyText(k, k), title: "Copy" }, el("span", { class: "nm" }, ":" + k.split(":").pop()), el("span", { class: "p" }, pct(us / r.total))))))] : null,
+      r.callers.size ? [el("h4", {}, "Called by"), list(r.callers)] : null,
+      r.callees.size ? [el("h4", {}, "Calls"), list(r.callees)] : null,
+      el("div", { class: "acts" },
+        el("button", { class: "btn", onclick: () => { st.view = "flame"; renderToolbar(); renderMain(); zoomToFn(f.fn); } }, icon("zoom"), "Find in graph"),
+        el("button", { class: "btn", onclick: () => askAgent(fnPrompt(f, r, total)) }, icon("spark"), host.on ? "Ask the agent" : "Prompt")));
+  }
+  function domCauseOf(r) { let b = "cpu", v = -1; for (const [c, x] of Object.entries(r.by)) if (x > v) { v = x; b = c; } return b; }
+  function fnPrompt(f, r, total) {
+    const callers = [...r.callers.values()].sort((a, b) => b.us - a.us).slice(0, 3).map(x => x.f.name).join(", ");
+    return `wits profiled ${opts.subject || "the program"}: ${f.func}${f.file ? ` (${fullWhere(f)})` : ""} accounts for ${pct(r.total / total)} of the ${[...st.causes].map(c => NAME[c]).join(" + ")} time (${pct(r.self / total)} in the function itself)` +
+      (callers ? `, called mostly from ${callers}` : "") + ". Read that code, explain why it is expensive, and propose a fix. Then measure the change with `wits run` and `wits diff`.";
+  }
+  function legend() {
+    const L = flameL();
+    const items = [["app", causeColor([...st.causes][0] || "cpu", L - 4)], ["lib", `hsl(215 46% ${L}%)`], ["std", `hsl(222 16% ${L + 2}%)`], ["sys", `hsl(222 10% ${L - 6}%)`], ["kernel", `hsl(252 14% ${L - 10}%)`]];
+    return el("div", { class: "legend" }, items.map(([k, c]) => el("button", { "aria-pressed": String(st.kindHi === k), title: "Highlight " + KIND[k], onclick: () => { st.kindHi = st.kindHi === k ? null : k; if (st.view !== "flame") { st.view = "flame"; renderMain(); } renderToolbar(); renderSide(); paint(); } },
+      el("i", { style: `background:${c}` }), KIND[k])));
+  }
+  function select(fn, zoomIt) {
+    st.sel = fn;
+    renderSide();
+    if (st.view === "flame") { paint(); if (zoomIt) zoomToFn(fn); } else renderMain();
+  }
+  function zoomToFn(fn) {
+    let best = null;
+    for (const n of index.values()) if (n.frame?.fn === fn && (!best || n.us > best.us)) best = n;
+    if (best) { st.sel = fn; zoom(best.parent && best.parent.kind !== "root" ? best.parent : best); renderSide(); }
+  }
+
+  // ---- main
+  function renderMain() {
+    hideTip();
+    if (st.view === "flame") {
+      put(mainCol, crumbs, scroller, el("div", { style: "display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap" }, info, el("div", { class: "spacer" }),
+        el("span", { class: "hintline", style: "margin:0" }, st.mine ? "Showing only your functions; library and runtime frames between them are folded (“…”)." : "Every frame, from the thread's start (top) to where the time is spent (bottom).")));
+      requestAnimationFrame(drawFlame);
+    } else if (st.view === "top") put(mainCol, renderTop());
+    else put(mainCol, renderPkg());
+  }
+  function update() { build(); renderToolbar(); renderMain(); renderSide(); }
+
+  const api = {
+    el: root,
+    solo(c) { if (present.includes(c)) { st.causes = new Set([c]); update(); } root.scrollIntoView({ behavior: motion ? "smooth" : "auto", block: "start" }); },
+    find(func, module) {
+      const fn = fnKey(func, module);
+      const f = F.find(x => x.fn === fn) || F.find(x => x.func === func);
+      if (!f) return false;
+      if (st.mine && f.kind !== "app") st.mine = false;
+      st.view = "flame"; build(); renderToolbar(); renderMain();
+      requestAnimationFrame(() => { zoomToFn(f.fn); paint(); });
+      root.scrollIntoView({ behavior: motion ? "smooth" : "auto", block: "start" });
+      return true;
+    },
+    pids(set, label) { st.pids = set; st.pidLabel = label; update(); root.scrollIntoView({ behavior: motion ? "smooth" : "auto", block: "start" }); },
+    key(ev) {
+      if (ev.key === "/" && document.activeElement?.tagName !== "INPUT") { ev.preventDefault(); toolbar._input?.focus(); }
+      else if (ev.key === "Escape") {
+        if (document.activeElement?.tagName === "INPUT" && st.q) { st.q = ""; renderToolbar(); paint(); if (st.view !== "flame") renderMain(); }
+        else if (st.focus) { const n = index.get(st.focus); zoom(n?.parent || tree); }
+        else if (st.sel) { st.sel = null; renderSide(); paint(); }
+      } else if (ev.key === "m" && document.activeElement?.tagName !== "INPUT" && M.hasApp) { st.mine = !st.mine; update(); }
+    },
+    redraw() { if (st.view === "flame") drawFlame(); renderSide(); },
+  };
+  update();
+  activeEx = api;
+  return api;
+}
+let resizeT;
+addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(() => activeEx?.redraw(), 150); });
+addEventListener("keydown", ev => { if (!ev.ctrlKey && !ev.metaKey) activeEx?.key(ev); });
+addEventListener("wits-theme", () => activeEx?.redraw());
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => activeEx?.redraw());
+function hideTip() { tip.style.display = "none"; }
+
+// ---------------------------------------------------------------- fix-here cards
+function hotCards(code, mainCause, ex, flame) {
+  const causes = (code?.causes || []).filter(c => c.cause !== "idle" && c.hot?.length);
+  if (!causes.length) return null;
+  let cur = causes.find(c => c.cause === mainCause) ? mainCause : causes[0].cause;
+  const box = el("div", {});
+  const tabs = el("div", { class: "tabs" });
+  function draw() {
+    put(tabs, ...(causes.length > 1 ? causes.map(c => causePill(c.cause, `${SHORT[c.cause]} ${secs(c.seconds)}`, c.cause === cur, () => { cur = c.cause; draw(); })) : []));
+    const c = causes.find(x => x.cause === cur);
+    const hot = c.hot.slice(0, 4);
+    put(box, tabs, ...hot.map((h, i) => {
+      const f = h.frame;
+      const chain = [h.via && h.via.func !== h.leaf?.func ? shortName(h.via.func) : null, h.leaf ? shortName(h.leaf.func) : null].filter(Boolean);
+      const callers = (h.callers || []).slice(0, 2).map(x => shortName(x.func));
+      const share = el("div", { class: "share", style: `width:0;background:${causeColor(cur)}` });
+      requestAnimationFrame(() => requestAnimationFrame(() => { share.style.width = h.share * 100 + "%"; }));
+      const card = el("div", { class: "hot", role: "button", tabindex: "0", title: flame ? "Show it in the explorer" : f.func,
+        onclick: () => { if (!(ex && ex.find(f.func, f.module))) copyText(fullWhere(f) || f.func, "the location"); },
+        onkeydown: e => { if (e.key === "Enter") e.currentTarget.click(); } },
+        el("div", { class: "rank", style: `background:${causeColor(cur, 52 - i * 4)}` }, i + 1),
+        el("div", { class: "fname", style: "padding-right:52px" }, shortName(f.func)),
+        el("div", { class: "loc" }, kindBadge(f), f.file ? el("button", { class: "copy", title: "Copy " + fullWhere(f), onclick: e => { e.stopPropagation(); copyText(fullWhere(f), fullWhere(f)); } }, where(f)) : el("span", {}, f.module || "")),
+        chain.length || callers.length ? el("div", { class: "chain" }, callers.length ? `called from ${callers.join(" ← ")}` : "", chain.length ? `${callers.length ? " · " : ""}spends it in ${chain.join(" → ")}` : "") : el("div", {}),
+        el("div", { class: "pc", style: `color:${causeColor(cur, 48)}` }, pct(h.share)),
+        share);
+      return card;
     }));
   }
   draw();
-  box.append(tabs, view, hint);
   return box;
 }
 
-// ---- views ----
-function answerView(a) {
-  const chips = el("div", { class: "chips" },
-    el("span", { class: "chip" }, "state ", el("b", {}, a.state)),
-    a.pod ? el("span", { class: "chip" }, "pod ", el("b", {}, a.pod)) : null,
-    el("span", { class: "chip" }, "confidence ", el("b", {}, a.confidence)),
-    el("span", { class: "chip" }, `${a.threads} thread${a.threads === 1 ? "" : "s"}, ${secs((a.window_ms || 0) / 1000)} watched`),
-    a.flame?.source || a.code?.source ? el("span", { class: "chip" }, "stacks from ", el("b", {}, a.flame?.source || a.code?.source)) : null);
+// ---------------------------------------------------------------- views
+function answerPage(a, opts = {}) {
+  const M = model(a.flame);
+  const bd = a.breakdown || {};
+  const parts = CAUSES.filter(c => c !== "idle" && (bd[c] || 0) > 0.003).map(c => [c, bd[c]]);
+  const main = a.cause;
+  const ex = M ? explorer(M, { cause: null, subject: `${a.name} (pid ${a.pid})` }) : null;
+  const sp = splitSummary(a);
+  const big = el("div", { class: "big" });
+  if (main) countUp(big, Math.round((a.share || 0) * 100), v => Math.round(v) + "%"); else big.textContent = "idle";
+  const center = [big, el("div", { class: "lbl" }, main ? NAME[main] : "nothing to do")];
+  const hero = el("div", { class: "card" }, el("div", { class: "hero" },
+    donut(parts.length ? parts : [["idle", 1]], center, ex ? c => ex.solo(c) : null),
+    el("div", { style: "min-width:0" },
+      el("div", { class: "who" }, el("b", {}, a.name || "process"), el("span", { class: "chip" }, "pid ", el("b", {}, a.pid)),
+        a.pod ? el("span", { class: "chip" }, "pod ", el("b", {}, a.pod)) : null, opts.node ? el("span", { class: "chip" }, "node ", el("b", {}, opts.node)) : null),
+      el("div", { class: "headline" }, (a.name || "It") + " " + sp.head),
+      sp.tail ? el("div", { class: "subline" }, sp.tail + (a.idle > 0.004 && main ? `; idle ${pct(a.idle)} of the time, not counted` : "")) : null,
+      el("div", { class: "pills" }, parts.map(([c, v]) => causePill(c, [NAME[c], " ", el("b", {}, pct(v))], null, ex ? () => ex.solo(c) : null))),
+      el("div", { class: "chips" },
+        el("span", { class: "chip" }, "state ", el("b", {}, a.state)),
+        el("span", { class: "chip " + (a.confidence === "high" ? "good" : a.confidence === "low" ? "bad" : "") }, "confidence ", el("b", {}, a.confidence)),
+        a.threads ? el("span", { class: "chip" }, `${a.threads} thread${a.threads === 1 ? "" : "s"}`) : null,
+        a.window_ms ? el("span", { class: "chip" }, `watched ${msec(a.window_ms)}`) : null,
+        a.code?.source ? el("span", { class: "chip" }, "stacks from ", el("b", {}, a.code.source)) : null),
+      el("div", { class: "actions" },
+        el("button", { class: "btn primary", onclick: () => askAgent(answerPrompt(a)) }, icon("spark"), host.on ? "Ask the agent to fix it" : "Copy a prompt for your agent"),
+        el("button", { class: "btn", onclick: () => copyText(a.summary, "the summary") }, icon("copy"), "Copy summary")))));
+  const hot = hotCards(a.code, main, ex, !!M);
   const b = a.blame;
-  return el("section", {},
-    el("h1", {}, a.summary),
-    chips,
-    breakdown(a.breakdown, a.idle),
-    el("dl", { class: "rows" },
+  const advice = ADVICE[main || "idle"];
+  const blamePid = b?.pid && b.pid !== a.pid && b.kind === "process" ? b.pid : null;
+  const why = el("div", { class: "card advice" }, el("h2", {}, "What it means"),
+    el("p", {}, advice[0]),
+    el("div", { class: "try" }, el("b", {}, "What to try"), advice[1]),
+    el("dl", { class: "facts" },
       a.what ? [el("dt", {}, "what"), el("dd", {}, a.what)] : null,
       a.where ? [el("dt", {}, "where"), el("dd", { class: "mono" }, a.where)] : null,
-      b?.text ? [el("dt", {}, "blame"), el("dd", {}, b.text)] : null,
-      a.cause == null && a.idle_what ? [el("dt", {}, "idle"), el("dd", {}, a.idle_what)] : null,
+      b?.text ? [el("dt", {}, "blame"), el("dd", {}, b.text,
+        blamePid ? el("div", { style: "margin-top:6px" }, el("button", { class: "btn", onclick: () => lookAt(blamePid, `${b.name || "pid"} (${blamePid})`) }, icon("spark"), host.on ? `Ask wits about ${b.name || "it"}` : `Copy: sudo wits ${blamePid}`)) : null)] : null,
+      !main && a.idle_what ? [el("dt", {}, "waiting on"), el("dd", {}, a.idle_what)] : null,
       (a.followed || []).length ? [el("dt", {}, "followed"), el("dd", {}, a.followed.map(f => `${f.name} (${f.pid})`).join(" → "))] : null),
     upstream(b, 0),
-    (a.notes || []).length ? el("ul", { class: "muted" }, a.notes.map(n => el("li", {}, n))) : null,
-    a.flame ? [el("h2", {}, "Where the time goes, by cause"), flameGraph(a.flame)]
-      : a.code?.causes?.length ? [el("h2", {}, "Hottest code, by cause"), hotList(a.code)] : null,
-    (a.code?.notes || []).length ? el("ul", { class: "muted" }, a.code.notes.map(n => el("li", {}, n))) : null);
+    (a.notes || []).length ? el("ul", { class: "notes" }, a.notes.map(n => el("li", {}, n))) : null);
+  const fix = el("div", { class: "card" }, el("h2", {}, main ? "Start here" : "Where it waits", el("span", { class: "sub" }, hot ? (M?.hasApp ? "your code where the time goes; click to explore" : "where the time goes; click to explore") : "")),
+    hot || el("p", { class: "muted", style: "margin:0" }, (a.code?.notes || [])[0] || (main ? "No stacks were collected, so wits cannot say which code. Run it with sudo to collect them." : "Nothing is slow here.")));
+  const out = [hero, el("div", { class: "row" }, fix, why)];
+  if (ex) out.push(el("div", { class: "card" }, el("h2", {}, "Explore the time", el("span", { class: "sub" }, `${M.source || "stacks"} · ${M.stacks.length} distinct stacks`)), ex.el));
+  if ((a.code?.notes || []).length) out.push(el("details", { class: "more" }, el("summary", {}, "About these stacks"), el("ul", { class: "notes" }, a.code.notes.map(n => el("li", {}, n)))));
+  return el("div", {}, out);
+}
+function upstream(b, depth) {
+  const u = b?.upstream;
+  if (!u?.answer || depth > 3) return null;
+  const a = u.answer;
+  return el("div", { class: "up" },
+    el("div", { style: "font-weight:650" }, a.summary || ""),
+    el("dl", { class: "facts", style: "margin-top:4px" },
+      a.what ? [el("dt", {}, "what"), el("dd", {}, a.what)] : null,
+      a.where ? [el("dt", {}, "where"), el("dd", { class: "mono" }, a.where)] : null,
+      a.blame?.text ? [el("dt", {}, "blame"), el("dd", {}, a.blame.text)] : null),
+    el("div", { class: "faint", style: "font-size:12px;margin-top:4px" }, `answered by the wits agent on node ${u.node}`),
+    upstream(a.blame, depth + 1));
+}
+function answerPrompt(a) {
+  const hot = (a.code?.causes || []).filter(c => c.cause !== "idle").flatMap(c => (c.hot || []).slice(0, 3).map(h =>
+    `- ${c.cause}: ${pct(h.share)} in ${h.frame.func}${h.frame.file ? ` (${fullWhere(h.frame)})` : ""}${h.leaf ? `, inside ${h.leaf.func}` : ""}`)).slice(0, 6);
+  return [`wits measured this: ${a.summary}.`, a.what && `What: ${a.what}`, a.where && `Where: ${a.where}`, a.blame?.text && `Blame: ${a.blame.text}`,
+    hot.length ? "Hottest code:\n" + hot.join("\n") : "",
+    "Look at that code, explain what makes it slow, and propose a fix. Measure before and after with `wits run -n 5 -o before.json -- <command>` and `wits diff`, and report the verdict as it is."].filter(Boolean).join("\n");
+}
+
+function answerView(a) {
+  return [header("process", a), answerPage(a)];
+}
+
+function listItem(sel, left, mid, right, onclick) {
+  return el("button", { class: "item", "aria-selected": String(sel), onclick }, left, mid, right);
 }
 
 function groupView(g) {
   const items = g.items || [];
-  const detail = el("div", {});
-  const tbody = el("tbody", {});
   const nodes = new Set(items.map(i => i.node));
-  function pick(i) {
-    [...tbody.children].forEach((tr, j) => tr.classList.toggle("sel", j === i));
-    detail.replaceChildren(answerView(items[i].answer));
+  const detail = el("div", { class: "nested" });
+  const list = el("div", { class: "list" });
+  let sel = 0;
+  function draw() {
+    put(list, ...items.map((it, i) => {
+      const a = it.answer || {};
+      return listItem(i === sel,
+        el("div", { style: "min-width:0" }, el("div", { class: "nm", title: a.pod || a.name }, a.pod ? a.pod.split("/").slice(1).join("/") : a.name),
+          el("div", { class: "sm" }, a.pod ? `${a.name} (${a.pid})` : `pid ${a.pid}`, nodes.size > 1 ? ` · node ${it.node}` : "")),
+        el("div", {}, stackBar(a.breakdown), el("div", { class: "sm", style: "margin-top:4px" }, a.cause ? `${NAME[a.cause]} ${pct(a.share)}` : a.state)),
+        el("div", { class: "why" }, a.cause ? a.what : a.idle_what || ""),
+        () => { sel = i; draw(); });
+    }));
+    const it = items[sel];
+    put(detail, it ? answerPage(it.answer, { node: nodes.size > 1 ? it.node : null }) : el("div", {}));
+    if (it && !it.answer?.flame && host.on) detail.prepend(el("div", { class: "actions", style: "margin:0 0 12px" },
+      el("button", { class: "btn", onclick: () => lookAt(it.answer.pid, it.answer.pod || it.answer.name) }, icon("zoom"), "Profile this one")));
   }
-  items.forEach((it, i) => {
-    const a = it.answer;
-    tbody.append(el("tr", { class: "pick", onclick: () => pick(i) },
-      el("td", { class: "mono" }, a.pod || "-"),
-      nodes.size > 1 ? el("td", {}, it.node) : null,
-      el("td", {}, `${a.name} (${a.pid})`),
-      el("td", {}, a.cause ? el("span", {}, el("span", { style: `color:${solid(a.cause)}` }, "■ "), `${a.cause} ${pct(a.share)}`) : a.state),
-      el("td", {}, a.cause ? a.what : a.idle_what)));
-  });
-  const view = el("section", {},
-    el("h1", {}, g.summary),
-    el("div", { class: "scroll" }, el("table", {},
-      el("thead", {}, el("tr", {}, el("th", {}, "pod"), nodes.size > 1 ? el("th", {}, "node") : null, el("th", {}, "process"), el("th", {}, "now"), el("th", {}, "why"))),
-      tbody)),
-    (g.notes || []).length ? el("ul", { class: "muted" }, g.notes.map(n => el("li", {}, n))) : null,
-    el("h2", {}, "Selected"), detail);
-  if (items.length) setTimeout(() => pick(0));
-  return view;
+  draw();
+  const causes = {};
+  for (const it of items) if (it.answer?.cause) causes[it.answer.cause] = (causes[it.answer.cause] || 0) + 1;
+  return [header(items.length > 1 ? `${items.length} processes` : "group", g),
+    el("div", { class: "card" },
+      el("div", { class: "headline", style: "margin-top:0" }, g.summary || "Several processes"),
+      el("div", { class: "chips" }, Object.entries(causes).map(([c, n]) => el("span", { class: "chip" }, el("b", {}, n), ` ${NAME[c]}`)),
+        g.window_ms ? el("span", { class: "chip" }, `watched ${msec(g.window_ms)}`) : null),
+      el("p", { class: "muted", style: "margin:12px 0 10px" }, "Busiest first. Click one to see its answer; compare the bars to see whether every replica has the same problem."),
+      list,
+      (g.notes || []).length ? el("ul", { class: "notes" }, g.notes.map(n => el("li", {}, n))) : null),
+    detail];
 }
 
 function runView(r) {
+  const M = model(r.flame);
   const cmd = (r.command || []).join(" ");
   const runs = r.runs_ms || [];
-  const range = runs.length > 1 ? ` (median of ${runs.length}, ${ms(Math.min(...runs))}–${ms(Math.max(...runs))})` : "";
   const sec = r.seconds || {};
-  const causes = ORDER.filter(c => (sec[c] || 0) > 0).sort((a, b) => sec[b] - sec[a]);
-  return el("section", {},
-    el("h1", {}, el("code", {}, cmd), ` took ${ms(r.wall_ms)}${range}, exit ${r.exit}`),
-    el("div", { class: "chips" }, el("span", { class: "chip" }, "on CPU ", el("b", {}, ms(r.cpu_ms))),
-      (n => el("span", { class: "chip" }, `${n} process${n === 1 ? "" : "es"}`))((r.processes || []).reduce((s, p) => s + (p.count || 0), 0))),
-    breakdown(r.breakdown, 0),
-    el("div", { class: "scroll" }, el("table", {},
-      el("thead", {}, el("tr", {}, el("th", {}, "cause"), el("th", { class: "n" }, "time"), el("th", {}, "processes"))),
-      el("tbody", {}, causes.map(c => el("tr", {},
-        el("td", {}, el("span", { style: `color:${solid(c)}` }, "■ "), c),
-        el("td", { class: "n" }, secs(sec[c])),
-        el("td", { class: "muted" }, (r.processes || []).filter(p => (p.seconds?.[c] || 0) > 0)
-          .sort((a, b) => b.seconds[c] - a.seconds[c]).slice(0, 4).map(p => `${p.name} ${secs(p.seconds[c])}`).join(", "))))))),
-    (r.notes || []).length ? el("ul", { class: "muted" }, r.notes.map(n => el("li", {}, n))) : null,
-    r.flame ? [el("h2", {}, "Where the time goes, by cause"), flameGraph(r.flame)]
-      : r.code?.causes?.length ? [el("h2", {}, "Hottest code, by cause"), hotList(r.code)] : null);
+  const bd = r.breakdown || {};
+  const parts = CAUSES.filter(c => c !== "idle" && (bd[c] || 0) > 0.003).map(c => [c, bd[c]]);
+  const top = parts.slice().sort((a, b) => b[1] - a[1])[0]?.[0];
+  const ex = M ? explorer(M, { subject: `\`${cmd}\`` }) : null;
+  const big = el("div", { class: "big" });
+  countUp(big, (r.wall_ms || 0) / 1000, v => secs(v));
+  const procs = (r.processes || []).slice().sort((a, b) => sum(b.seconds) - sum(a.seconds));
+  const maxP = Math.max(1e-9, ...procs.map(p => sum(p.seconds)));
+  const hero = el("div", { class: "card" }, el("div", { class: "hero" },
+    donut(parts.length ? parts : [["idle", 1]], [big, el("div", { class: "lbl" }, runs.length > 1 ? `median of ${runs.length}` : "wall time")], ex ? c => ex.solo(c) : null),
+    el("div", { style: "min-width:0" },
+      el("div", { class: "who" }, el("code", { style: "overflow-wrap:anywhere" }, cmd)),
+      el("div", { class: "headline" }, `Took ${msec(r.wall_ms)}` + (top ? `, mostly ${NAME[top]}` : "")),
+      el("div", { class: "subline" }, runs.length > 1 ? `${runs.length} runs, ${msec(Math.min(...runs))} to ${msec(Math.max(...runs))}` : "one run"),
+      el("div", { class: "pills" }, parts.map(([c, v]) => causePill(c, [NAME[c], " ", el("b", {}, pct(v)), el("span", { class: "t" }, " " + secs(sec[c]))], null, ex ? () => ex.solo(c) : null))),
+      el("div", { class: "chips" },
+        el("span", { class: "chip " + (r.exit === 0 ? "good" : "bad") }, "exit ", el("b", {}, r.exit)),
+        el("span", { class: "chip" }, "on CPU ", el("b", {}, msec(r.cpu_ms))),
+        el("span", { class: "chip" }, (n => `${n} process${n === 1 ? "" : "es"}`)(procs.reduce((s, p) => s + (p.count || 0), 0)))),
+      el("div", { class: "actions" },
+        el("button", { class: "btn primary", onclick: () => askAgent(runPrompt(r, cmd)) }, icon("spark"), host.on ? "Ask the agent to speed it up" : "Copy a prompt for your agent"),
+        el("button", { class: "btn", onclick: () => copyText(`wits run -n 5 -o after.json -- ${cmd}`, "the command to measure again") }, icon("copy"), "Command to measure again")))));
+  const pcard = procs.length ? el("div", { class: "card" }, el("h2", {}, "Processes", el("span", { class: "sub" }, M ? "click one to explore only its time" : "")),
+    el("div", { class: "list" }, procs.slice(0, 12).map(p => {
+      const s = sum(p.seconds);
+      return listItem(false,
+        el("div", { style: "min-width:0" }, el("div", { class: "nm" }, p.name), el("div", { class: "sm" }, `${p.count || 1} process${(p.count || 1) === 1 ? "" : "es"}`)),
+        el("div", {}, el("div", { class: "sbar", style: `width:${Math.max(4, s / maxP * 100)}%` }, CAUSES.filter(c => c !== "idle" && p.seconds?.[c]).map(c => el("i", { style: `width:${p.seconds[c] / s * 100}%;background:${causeColor(c)}`, title: `${NAME[c]} ${secs(p.seconds[c])}` })))),
+        el("div", { class: "why" }, CAUSES.filter(c => c !== "idle" && (p.seconds?.[c] || 0) > 0.0005).map(c => `${SHORT[c]} ${secs(p.seconds[c])}`).join(" · ")),
+        () => { if (!ex) return; const pids = new Set(Object.entries(M.procs).filter(([, n]) => n === p.name || p.name.startsWith(n)).map(([k]) => +k)); if (pids.size) ex.pids(pids, p.name); else toast("No stacks for that process"); });
+    }))) : null;
+  const hot = hotCards(r.code, top, ex, !!M);
+  const advice = ADVICE[top || "idle"];
+  const out = [header("run", r), hero,
+    el("div", { class: "row" },
+      el("div", { class: "card" }, el("h2", {}, "Start here", el("span", { class: "sub" }, hot ? "click to explore" : "")), hot || el("p", { class: "muted", style: "margin:0" }, "No stacks were collected.")),
+      el("div", { class: "card advice" }, el("h2", {}, "What it means"), el("p", {}, advice[0]), el("div", { class: "try" }, el("b", {}, "What to try"), advice[1]),
+        el("p", { class: "muted", style: "margin:0" }, "After a change, measure again and compare: ", el("code", {}, "wits diff before.json after.json"), "."),
+        (r.notes || []).length ? el("ul", { class: "notes" }, r.notes.map(n => el("li", {}, n))) : null)),
+    pcard];
+  if (ex) out.push(el("div", { class: "card" }, el("h2", {}, "Explore the time", el("span", { class: "sub" }, `${M.source || "stacks"} · ${M.stacks.length} distinct stacks`)), ex.el));
+  return out;
+}
+function sum(o) { return CAUSES.filter(c => c !== "idle").reduce((s, c) => s + (o?.[c] || 0), 0); }
+function runPrompt(r, cmd) {
+  const hot = (r.code?.causes || []).filter(c => c.cause !== "idle").flatMap(c => (c.hot || []).slice(0, 3).map(h =>
+    `- ${c.cause}: ${pct(h.share)} in ${h.frame.func}${h.frame.file ? ` (${fullWhere(h.frame)})` : ""}`)).slice(0, 6);
+  const bd = r.breakdown || {};
+  return [`wits ran \`${cmd}\`: it took ${msec(r.wall_ms)} (exit ${r.exit}). Time by cause: ${CAUSES.filter(c => c !== "idle" && bd[c] > 0.003).map(c => `${c} ${pct(bd[c])}`).join(", ")}.`,
+    hot.length ? "Hottest code:\n" + hot.join("\n") : "",
+    "Make it faster where the time goes. Save this run with `wits run -n 5 -o before.json -- " + cmd + "`, change the code, run again with -o after.json, and report `wits diff before.json after.json` as it is."].filter(Boolean).join("\n");
 }
 
 function diffView(d) {
   const w = d.wall_ms || {};
   const ch = w.change;
-  const max = Math.max(1e-9, ...(d.causes || []).map(c => Math.max(c.before, c.after)));
-  return el("section", {},
-    el("div", { class: "verdict " + (d.verdict === "faster" ? "faster" : d.verdict === "slower" ? "slower" : "") }, d.verdict),
-    el("h1", {}, `${ms(w.before)} → ${ms(w.after)}`, ch != null ? ` (${ch > 0 ? "+" : "−"}${Math.abs(Math.round(ch * 100))}%)` : ""),
-    el("p", { class: "muted" }, d.noise),
-    el("h2", {}, "By cause"),
-    el("div", { class: "scroll" }, el("table", {},
-      el("thead", {}, el("tr", {}, el("th", {}, "cause"), el("th", { class: "n" }, "before"), el("th", { class: "n" }, "after"), el("th", { class: "n" }, "change"), el("th", {}, ""))),
-      el("tbody", {}, (d.causes || []).map(c => el("tr", {},
-        el("td", {}, el("span", { style: `color:${solid(c.cause)}` }, "■ "), c.cause),
-        el("td", { class: "n" }, secs(c.before)), el("td", { class: "n" }, secs(c.after)),
-        el("td", { class: "n" }, (c.after - c.before >= 0 ? "+" : "−") + secs(Math.abs(c.after - c.before))),
-        el("td", { style: "width:40%" },
-          el("div", { class: "bar", style: "height:7px;margin:2px 0" }, el("span", { style: `width:${c.before / max * 100}%;background:var(--muted)` })),
-          el("div", { class: "bar", style: "height:7px;margin:2px 0" }, el("span", { style: `width:${c.after / max * 100}%;background:${solid(c.cause)}` })))))))),
-    (d.functions || []).length ? [el("h2", {}, "Functions that changed most"),
-      el("div", { class: "scroll" }, el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "function"), el("th", {}, "cause"), el("th", { class: "n" }, "before"), el("th", { class: "n" }, "after"), el("th", { class: "n" }, "change"))),
-        el("tbody", {}, d.functions.map(f => el("tr", {},
-          el("td", { class: "mono" }, f.func, f.file ? el("span", { class: "muted" }, " ", shortPath(f.file)) : null),
-          el("td", {}, f.cause), el("td", { class: "n" }, secs(f.before)), el("td", { class: "n" }, secs(f.after)),
-          el("td", { class: "n" }, (f.after - f.before >= 0 ? "+" : "−") + secs(Math.abs(f.after - f.before))))))))] : null,
-    (d.notes || []).length ? el("ul", { class: "muted" }, d.notes.map(n => el("li", {}, n))) : null);
+  const good = d.verdict === "faster", bad = d.verdict === "slower";
+  const col = good ? "var(--good)" : bad ? "var(--bad)" : "var(--muted)";
+  const soft = good ? "var(--good-soft)" : bad ? "var(--bad-soft)" : "var(--surface-2)";
+  const causes = (d.causes || []).filter(c => c.before || c.after);
+  const max = Math.max(1e-9, ...causes.map(c => Math.max(c.before, c.after)));
+  const st = { cause: null, q: "" };
+  const fbox = el("div", {});
+  const funcs = d.functions || [];
+  const fmax = Math.max(1e-9, ...funcs.map(f => Math.abs(f.after - f.before)));
+  function drawFuncs() {
+    let rows = funcs.filter(f => (!st.cause || f.cause === st.cause) && (!st.q || f.func.toLowerCase().includes(st.q) || (f.file || "").toLowerCase().includes(st.q)));
+    put(fbox, rows.length ? el("div", { class: "tscroll" }, el("table", {},
+      el("thead", {}, el("tr", {}, el("th", {}, "Function"), el("th", {}, "Cause"), el("th", { class: "n" }, "Before"), el("th", { class: "n" }, "After"), el("th", { style: "text-align:center" }, "Change"))),
+      el("tbody", {}, rows.map(f => {
+        const dlt = f.after - f.before, k = Math.abs(dlt) / fmax * 72;
+        const bar = el("i", { style: `width:0;background:${dlt < 0 ? "var(--good)" : "var(--bad)"}` });
+        requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = k + "%"; }));
+        return el("tr", { onclick: () => copyText(f.file ? `${f.file}` : f.func, f.file ? "the file" : "the function") },
+          el("td", {}, el("div", { class: "fcell" }, el("span", { class: "nm", title: f.func }, shortName(f.func)), el("span", { class: "sm" }, f.file ? shortPath(f.file) : ""))),
+          el("td", {}, el("span", { class: "badge", style: `color:${causeColor(f.cause, 45)}` }, SHORT[f.cause] || f.cause)),
+          el("td", { class: "n" }, secs(f.before)), el("td", { class: "n" }, secs(f.after)),
+          el("td", { style: "min-width:200px" }, el("div", { class: "dv", title: (dlt >= 0 ? "+" : "−") + secs(Math.abs(dlt)) },
+            el("div", { class: "l" }, dlt < 0 ? [el("span", { class: "faint", style: "font-size:11.5px;margin-right:6px" }, "−" + secs(-dlt)), bar] : null),
+            el("div", { class: "r" }, dlt >= 0 ? [bar, el("span", { class: "faint", style: "font-size:11.5px;margin-left:6px" }, "+" + secs(dlt))] : null))));
+      })))) : el("p", { class: "empty" }, "No function changed enough to show."));
+  }
+  drawFuncs();
+  const pct2 = ch != null ? `${ch > 0 ? "+" : "−"}${Math.abs(Math.round(ch * 100))}%` : "";
+  const big = el("div", { style: `font-size:44px;font-weight:780;letter-spacing:-.03em;color:${col}` }, pct2 || d.verdict);
+  const hero = el("div", { class: "card" }, el("div", { class: "hero" },
+    el("div", { class: "verdict-ico", style: `background:${soft};color:${col}`, html: ICON[good ? "down" : bad ? "up" : "same"] }),
+    el("div", { style: "min-width:0" },
+      el("div", { class: "who" }, "wits diff"),
+      el("div", { class: "headline", style: `color:${col}` }, good ? "Faster" : bad ? "Slower" : "No clear change"),
+      el("div", { style: "display:flex;align-items:baseline;gap:16px;flex-wrap:wrap" }, big, el("div", { class: "subline" }, `${msec(w.before)} → ${msec(w.after)}`)),
+      el("div", { class: "subline", style: "margin-top:4px" }, d.noise || ""),
+      el("div", { class: "actions" }, el("button", { class: "btn primary", onclick: () => askAgent(diffPrompt(d)) }, icon("spark"), host.on ? "Tell the agent" : "Copy a summary for your agent")))));
+  const ccard = el("div", { class: "card" }, el("h2", {}, "Time by cause", el("span", { class: "sub" }, "grey is before; click a cause to filter the functions")),
+    el("div", { class: "list" }, causes.map(c => {
+      const dlt = c.after - c.before;
+      const b1 = el("i", { style: "width:0;background:var(--line-2)" }), b2 = el("i", { style: `width:0;background:${causeColor(c.cause)}` });
+      requestAnimationFrame(() => requestAnimationFrame(() => { b1.style.width = c.before / max * 100 + "%"; b2.style.width = c.after / max * 100 + "%"; }));
+      const it = listItem(st.cause === c.cause,
+        el("div", {}, el("div", { class: "nm" }, el("span", { style: `color:${causeColor(c.cause)}` }, "● "), NAME[c.cause] || c.cause), el("div", { class: "sm" }, `${secs(c.before)} → ${secs(c.after)}`)),
+        el("div", { class: "twin" }, b1, b2),
+        el("div", { style: `font-weight:650;color:${Math.abs(dlt) < 1e-6 ? "var(--muted)" : dlt < 0 ? "var(--good)" : "var(--bad)"}` }, (dlt >= 0 ? "+" : "−") + secs(Math.abs(dlt))),
+        () => { st.cause = st.cause === c.cause ? null : c.cause; [...it.parentNode.children].forEach(x => x.setAttribute("aria-selected", "false")); it.setAttribute("aria-selected", String(st.cause === c.cause)); drawFuncs(); });
+      return it;
+    })));
+  const fcard = funcs.length ? el("div", { class: "card" }, el("h2", {}, "Functions that changed most", el("span", { class: "sub" }, "green got faster, red got slower")),
+    el("div", { class: "toolbar" }, el("label", { class: "search" }, el("span", { html: ICON.search }), el("input", { type: "search", placeholder: "Search functions", oninput: e => { st.q = e.target.value.trim().toLowerCase(); drawFuncs(); } }))),
+    fbox) : null;
+  if (good && motion) setTimeout(confetti, 350);
+  return [header("diff", d), hero, ccard, fcard, (d.notes || []).length ? el("div", { class: "card" }, el("ul", { class: "notes", style: "margin:0" }, d.notes.map(n => el("li", {}, n)))) : null];
+}
+function diffPrompt(d) {
+  const w = d.wall_ms || {};
+  const f = (d.functions || []).slice(0, 5).map(x => `- ${x.func}: ${secs(x.before)} → ${secs(x.after)} (${x.cause})`);
+  return [`wits diff: ${d.verdict}, ${msec(w.before)} → ${msec(w.after)}${w.change != null ? ` (${Math.round(w.change * 100)}%)` : ""}. ${d.noise || ""}`,
+    f.length ? "Functions that changed most:\n" + f.join("\n") : "",
+    d.verdict === "slower" ? "Find what made it slower and fix it." : d.verdict === "faster" ? "Report this result as measured." : "The change made no measurable difference; do not call it a speedup."].filter(Boolean).join("\n");
+}
+function confetti() {
+  const c = el("canvas", { class: "confetti" }); document.body.append(c);
+  const ctx = c.getContext("2d"), W = c.width = innerWidth, H = c.height = innerHeight;
+  const cols = ["#3dd095", "#5b55f0", "#f5a524", "#ff6b8b", "#2f9bff"];
+  const ps = Array.from({ length: 110 }, () => ({ x: W / 2 + (Math.random() - .5) * 160, y: H * .32, vx: (Math.random() - .5) * 13, vy: -Math.random() * 12 - 4, r: Math.random() * 6 + 3, c: cols[Math.random() * cols.length | 0], a: Math.random() * 6, va: (Math.random() - .5) * .4 }));
+  const t0 = performance.now();
+  (function f(t) {
+    ctx.clearRect(0, 0, W, H);
+    for (const p of ps) { p.x += p.vx; p.y += p.vy; p.vy += .38; p.vx *= .99; p.a += p.va; ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a); ctx.fillStyle = p.c; ctx.fillRect(-p.r / 2, -p.r / 4, p.r, p.r / 2); ctx.restore(); }
+    if (t - t0 < 1900) requestAnimationFrame(f); else c.remove();
+  })(t0);
 }
 
 function overviewView(o) {
   const rows = o.processes || [];
-  const detail = el("div", {});
-  const tbody = el("tbody", {});
-  rows.forEach((r, i) => tbody.append(el("tr", {
-    class: "pick", onclick: () => {
-      [...tbody.children].forEach((tr, j) => tr.classList.toggle("sel", j === i));
-      detail.replaceChildren(r.answer ? answerView(r.answer) : el("p", { class: "muted" }, "It exited before wits could look."));
-    }
-  }, el("td", { class: "n" }, r.pid), el("td", {}, r.name), el("td", { class: "n" }, pct(r.waiting)),
-    el("td", {}, r.answer?.summary || ""))));
-  return el("section", {},
-    el("h1", {}, rows.length ? "Processes waiting most right now" : "Nothing was waiting or working hard"),
-    el("div", { class: "scroll" }, el("table", {},
-      el("thead", {}, el("tr", {}, el("th", { class: "n" }, "pid"), el("th", {}, "name"), el("th", { class: "n" }, "waiting"), el("th", {}, "why"))),
-      tbody)),
-    el("h2", {}, "Selected"), detail);
+  const detail = el("div", { class: "nested" });
+  const list = el("div", { class: "list" });
+  let sel = -1;
+  function draw() {
+    put(list, ...rows.map((r, i) => {
+      const a = r.answer;
+      return listItem(i === sel,
+        el("div", { style: "min-width:0" }, el("div", { class: "nm" }, r.name), el("div", { class: "sm" }, `pid ${r.pid}${a?.pod ? " · " + a.pod : ""}`)),
+        el("div", {}, a ? stackBar(a.breakdown) : null, el("div", { class: "sm", style: "margin-top:4px" }, `waiting ${pct(r.waiting)}` + (a?.cause ? ` · ${NAME[a.cause]}` : ""))),
+        el("div", { class: "why" }, a ? (a.cause ? a.what || a.summary : a.summary) : "exited before wits could look"),
+        () => { sel = sel === i ? -1 : i; draw(); });
+    }));
+    const r = rows[sel];
+    put(detail, ...(r?.answer ? [answerPage(r.answer)] : []));
+    if (r?.answer && !r.answer.flame && host.on) detail.prepend(el("div", { class: "actions", style: "margin:0 0 12px" },
+      el("button", { class: "btn", onclick: () => lookAt(r.pid, r.name) }, icon("zoom"), "Profile it")));
+  }
+  draw();
+  return [header("overview", o),
+    el("div", { class: "card" },
+      el("div", { class: "headline", style: "margin-top:0" }, rows.length ? "What is waiting right now" : "Nothing is waiting or working hard"),
+      el("p", { class: "muted", style: "margin:4px 0 14px" }, rows.length ? "The processes that spent most of the last moments waiting. Click one for its answer." : ""),
+      list),
+    detail];
+}
+
+function waiting(text, seconds) {
+  const bar = el("i", {});
+  put(app, el("div", { class: "waiting" }, el("div", { class: "radar" }), el("div", { style: "font-size:15px" }, text), seconds ? el("div", { class: "progress" }, bar) : null));
+  if (seconds) requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transition = `width ${seconds}s linear`; bar.style.width = "100%"; }));
 }
 
 function render(d) {
-  tip.style.display = "none";
-  if (!d || typeof d !== "object") { app.replaceChildren(el("p", { class: "muted" }, "wits returned nothing to show.")); return; }
+  hideTip();
+  activeEx = null;
+  if (!d || typeof d !== "object") { put(app, el("p", { class: "empty" }, "wits returned nothing to show.")); return; }
   let v;
-  if (d.kind === "group") v = groupView(d);
-  else if (d.kind === "run") v = runView(d);
-  else if (d.kind === "diff") v = diffView(d);
-  else if (Array.isArray(d.processes) && d.pid == null) v = overviewView(d);
-  else if (d.pid != null) v = answerView(d);
-  else v = el("pre", { class: "mono" }, JSON.stringify(d, null, 2));
-  app.replaceChildren(v, el("p", { class: "hint" }, "wits · why is it slow, and where in the code"));
-  document.title = "wits: " + (d.summary || d.verdict || (d.command || []).join(" ") || "profile");
+  try {
+    if (d.kind === "group") v = groupView(d);
+    else if (d.kind === "run") v = runView(d);
+    else if (d.kind === "diff") v = diffView(d);
+    else if (Array.isArray(d.processes) && d.pid == null) v = overviewView(d);
+    else if (d.pid != null) v = answerView(d);
+    else v = [header("data"), el("pre", { class: "mono card" }, JSON.stringify(d, null, 2))];
+  } catch (e) {
+    v = [header("error"), el("div", { class: "card" }, el("p", {}, "This page could not draw the result: " + e.message), el("pre", { class: "mono", style: "white-space:pre-wrap" }, JSON.stringify(d, null, 2).slice(0, 4000)))];
+    console.error(e);
+  }
+  put(app, ...[v].flat(), el("div", { class: "foot" }, "wits · why is it slow, and where in the code"));
+  document.title = "wits: " + (d.summary || (d.verdict ? "diff: " + d.verdict : "") || (d.command || []).join(" ") || "profile");
 }
 
-// ---- data: embedded in a saved page, or from an MCP host (MCP Apps) ----
+// ---------------------------------------------------------------- start: embedded data, or an MCP host
+try { const t = localStorage.getItem("wits-theme"); if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; } catch (_) {}
 const raw = document.getElementById("wits-data").textContent.trim();
 if (raw && raw !== "__WITS_" + "DATA__") {
-  try { render(JSON.parse(raw)); } catch (e) { app.replaceChildren(el("p", {}, "Could not read the data: " + e)); }
+  try { show(JSON.parse(raw), false); } catch (e) { put(app, el("p", { class: "empty" }, "Could not read the data: " + e)); }
 } else if (window.parent !== window) {
+  host.on = true;
   let next = 1;
-  const waiting = new Map();
+  const pending = new Map();
   const post = m => window.parent.postMessage(m, "*");
-  const request = (method, params) => new Promise(ok => { const id = next++; waiting.set(id, ok); post({ jsonrpc: "2.0", id, method, params }); });
+  host.request = (method, params) => new Promise(ok => { const id = next++; pending.set(id, ok); post({ jsonrpc: "2.0", id, method, params }); });
   const notify = (method, params) => post({ jsonrpc: "2.0", method, params });
-  const theme = ctx => { if (ctx?.theme === "dark" || ctx?.theme === "light") document.documentElement.dataset.theme = ctx.theme; };
-  window.addEventListener("message", ev => {
+  const theme = ctx => { if (ctx?.theme === "dark" || ctx?.theme === "light") { document.documentElement.dataset.theme = ctx.theme; window.dispatchEvent(new Event("wits-theme")); } };
+  addEventListener("message", ev => {
     if (ev.source !== window.parent) return;
     const m = ev.data;
     if (!m || m.jsonrpc !== "2.0") return;
-    if (m.id != null && !m.method && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); return; }
+    if (m.id != null && !m.method && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); return; }
     switch (m.method) {
+      case "ui/notifications/tool-input": {
+        host.args = m.params?.arguments || null;
+        const a = host.args || {};
+        const what = a.command ? (Array.isArray(a.command) ? a.command.join(" ") : a.command) : a.target || (a.targets || []).join(", ") || "the system";
+        waiting(a.command ? `Running ${what}…` : `Watching ${what}…`, a.command ? 0 : (a.seconds || 2));
+        break;
+      }
       case "ui/notifications/tool-result": {
         const r = m.params || {};
         let d = r.structuredContent;
         if (!d) { try { d = JSON.parse((r.content || []).find(c => c.type === "text")?.text || ""); } catch (_) {} }
-        if (r.isError && !d) app.replaceChildren(el("p", {}, (r.content || []).map(c => c.text).join("\n")));
-        else render(d);
+        if (r.isError && !d) put(app, header("error"), el("div", { class: "card" }, el("pre", { class: "mono", style: "white-space:pre-wrap;margin:0" }, (r.content || []).map(c => c.text).join("\n"))));
+        else show(d, false);
         break;
       }
-      case "ui/notifications/tool-input":
-        app.replaceChildren(el("p", { class: "muted" }, "wits is watching…"));
-        break;
       case "ui/notifications/host-context-changed": theme(m.params); break;
       case "ui/resource-teardown": if (m.id != null) post({ jsonrpc: "2.0", id: m.id, result: {} }); break;
       default: if (m.id != null) post({ jsonrpc: "2.0", id: m.id, error: { code: -32601, message: "not supported" } });
     }
   });
-  request("ui/initialize", { appInfo: { name: "wits", version: "1" }, appCapabilities: {}, protocolVersion: "2026-01-26" })
-    .then(r => { theme(r.result?.hostContext); notify("ui/notifications/initialized", {}); });
+  host.request("ui/initialize", { appInfo: { name: "wits", version: "2" }, appCapabilities: {}, protocolVersion: "2026-01-26" })
+    .then(r => { host.caps = r.result?.hostCapabilities || {}; host.ctx = r.result?.hostContext || {}; theme(host.ctx); notify("ui/notifications/initialized", {}); });
   new ResizeObserver(() => notify("ui/notifications/size-changed", {
     width: Math.ceil(document.documentElement.scrollWidth), height: Math.ceil(document.documentElement.scrollHeight)
   })).observe(document.body);

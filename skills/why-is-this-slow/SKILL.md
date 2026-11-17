@@ -86,7 +86,8 @@ Abridged:
 | `blame.upstream` | When the other end of a connection is on another node with a wits agent: `node`, and `answer`, that node's full answer for the blamed process (same shape as this one). Read it instead of rerunning. |
 | `blame.conn` | `local` and `remote` address of the connection being waited on |
 | `breakdown` | Share of non-idle time for all six causes |
-| `code.causes` | Per cause, the hottest functions: `frame` (the first function in the program's own code), `leaf` (the library or system function it is in, e.g. `fsync`), `callers`, `share`, `seconds` |
+| `code.causes` | Per cause, the hottest functions: `frame` (the first function in the program's own code), `via` (the library function it called on the way), `leaf` (where the time actually is, e.g. `fsync`), `callers`, `share`, `seconds` |
+| `frame.kind`, `frame.package` | Whose code a frame is: `app` (the program's own), `lib` (a dependency, named in `package`: a crate, Go module, npm, Python or Ruby package, or shared library), `std` (the language's standard library and runtime), `sys` (the C library), `kernel`. Change `app` code; a `lib` hot spot usually means the program calls it too often or with too much data. |
 | `code.source`, `code.notes` | How stacks were collected (`ebpf`, `stack-scan`, `sample`), and what is missing and why |
 | `pod` | `namespace/pod/container` when the process runs in Kubernetes, else `null` |
 | `followed` | Parents wits skipped because they were only waiting for this child |

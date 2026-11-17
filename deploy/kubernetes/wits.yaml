@@ -69,7 +69,7 @@ spec:
       priorityClassName: system-node-critical
       containers:
         - name: wits
-          image: ghcr.io/aryehlev/wits:v2.1.0
+          image: ghcr.io/aryehlev/wits:v2.2.0
           args: ["agent", "--listen", "0.0.0.0:7477"]
           env:
             - name: NODE_NAME

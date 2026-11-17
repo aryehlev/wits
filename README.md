@@ -179,18 +179,32 @@ Languages:
 ### See it
 
 Add `--html <file>` to any command and wits also writes its answer as one
-self-contained web page: the answer on top, then a flame graph for each cause.
-Click a frame to zoom in.
+self-contained web page you can click through:
 
 ```sh
 sudo wits run --html run.html -- ./server --selftest
 ```
 
-![the page wits writes: time by cause, then a flame graph per cause](demo/profile.png)
+![the page wits writes: the answer, where to start in your code, and an explorer of the time](demo/profile.png)
 
-The same page shows a list of pods (click one for its answer), a `diff`, or
-the overview. It is also what an MCP host shows for wits's tools, when it
-supports MCP Apps.
+- **The answer first.** What the time went to, as a ring you can click, and
+  in plain words what it means and what to try.
+- **Start here.** Your hottest functions, with file and line (click to copy)
+  and what they spend the time in. wits tells your code apart from
+  dependencies, the language's standard library, the C library and the
+  kernel, for Rust, Go, C and C++, Python, Node, Java, Ruby and .NET.
+- **Explore.** An animated flame graph: click to zoom, hover to light up a
+  function everywhere it appears, search, and **Only my code** to fold away
+  the runtime between your functions. **Top functions** ranks them, **By
+  package** shows whose code the time is in, and clicking any function shows
+  who calls it, what it calls and its hot lines.
+- **Ask your agent.** One button writes a prompt with the answer and the
+  hottest code for your coding agent.
+
+The same page shows several pods side by side, a `diff` (with what changed,
+function by function), a run, or the overview. MCP hosts that support MCP
+Apps show it next to wits's tool results; there it can also ask wits about
+the process to blame, and look again.
 
 For deeper work on the stacks, use the tools made for it: `wits profile
 --folded <pid>` writes folded stacks, rooted at the cause (`[cpu]`, `[disk]`,
