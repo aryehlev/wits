@@ -461,7 +461,10 @@ On Linux, wits watches every thread of the process for two seconds:
   the Go runtime park a contended-lock waiter the same way, and wits relies on
   that. The holder is named only for glibc mutexes. With stacks, the lock
   functions of other runtimes (`parking_lot`, Go's `sync.Mutex`, the JVM's
-  monitors, the Python GIL) are recognised as `lock`.
+  monitors, the Python GIL) are recognised as `lock`. Python's `Event.wait`,
+  `Queue.get` and `Thread.join` wait through a lock too: with Python's frames
+  (`PYTHONPERFSUPPORT=1`) wits counts them as idle, without them it may count
+  them as `lock`.
 - **Stacks need frame pointers.** Native code built without them gives short
   stacks; wits names the library responsible. Interpreted code shows the
   interpreter's functions unless the runtime publishes a perf map.
@@ -479,7 +482,9 @@ On Linux, wits watches every thread of the process for two seconds:
 - **Memory needs evidence.** Without swap-ins or a cgroup limit being hit,
   pages read back from disk are reported as `disk`.
 - **Virtual machines:** CPU time taken by the hypervisor is reported as
-  `cpu-wait` with nobody to blame.
+  `cpu-wait` with nobody to blame. While wits runs it keeps the virtual CPUs
+  awake, so short sleeps (a few milliseconds) end sooner under wits than
+  without it: compare runs made the same way, with `wits diff`.
 - **Other nodes need the agent.** Without one, a remote address is just a
   remote host. `kubectl wits` without the DaemonSet follows blame only
   between the nodes it started pods on.

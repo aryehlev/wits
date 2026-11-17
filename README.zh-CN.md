@@ -405,6 +405,8 @@ cp -r skills/why-is-this-slow ~/.claude/skills/
 - **互斥锁是按惯例识别的。** glibc、Rust 标准库和 Go 运行时让等锁的线程以同样的方式休眠，
   wits 依赖这一点。只有 glibc 的互斥锁能指出持有者。有调用栈时，其他运行时的锁函数
   （`parking_lot`、Go 的 `sync.Mutex`、JVM 的 monitor、Python GIL）会被识别为 `lock`。
+  Python 的 `Event.wait`、`Queue.get` 和 `Thread.join` 也是通过锁来等待的：有 Python 的
+  调用栈帧（`PYTHONPERFSUPPORT=1`）时 wits 把它们算作空闲，没有时可能算作 `lock`。
 - **调用栈需要帧指针。** 不带帧指针编译的原生代码调用栈会很短，wits 会指出是哪个库造成的。
   解释型代码显示的是解释器的函数，除非运行时发布了 perf map。
 - **Linux 上不用 root 就没有 CPU 上的调用栈**；macOS 上存活不到 60 毫秒的进程也没有。
@@ -416,6 +418,8 @@ cp -r skills/why-is-this-slow ~/.claude/skills/
   元凶”。
 - **内存需要证据。** 如果没有换入，也没有触到 cgroup 限额，从磁盘读回的页会被报告为 `disk`。
 - **虚拟机：** 被 hypervisor 拿走的 CPU 时间会被报告为 `cpu-wait`，且找不到责任方。
+  wits 运行时会让虚拟 CPU 保持唤醒，所以在虚拟机里，很短的 sleep（几毫秒）在 wits 下会比
+  平时结束得早：请用同样的方式运行，再用 `wits diff` 比较。
 - **其他节点需要 agent。** 没有 agent 时，远程地址就只是一台远程主机。没有 DaemonSet 时，
   `kubectl wits` 只在它启动了 pod 的节点之间追查归因。
 - **副本是按名字识别的。** 不是通过 Deployment、StatefulSet、DaemonSet 或 Job 创建、而是你

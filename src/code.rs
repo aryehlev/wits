@@ -148,6 +148,22 @@ impl Stacks {
     }
 }
 
+/// A Python lock taken by `Condition.wait` (and so by `Event.wait`,
+/// `Queue.get`, `Future.result`) or by joining a thread is a wait for
+/// something to happen, not a fight over a lock. A semaphore's slots are
+/// fought over. Needs the Python frames (`PYTHONPERFSUPPORT=1`).
+pub fn python_event_wait(frames: &[Frame]) -> bool {
+    let mut py = frames
+        .iter()
+        .filter(|f| f.module == "[python]")
+        .map(|f| f.func.as_str());
+    match py.next() {
+        Some("Condition.wait") => py.next() != Some("Semaphore.acquire"),
+        Some("Thread._wait_for_tstate_lock") => true,
+        _ => false,
+    }
+}
+
 /// Whose code a frame is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -643,26 +659,86 @@ fn folded_name(f: &Frame) -> String {
     }
 }
 
-/// Every stack, for a flame graph, as JSON: each frame once
-/// (`[func, module, file, line, kernel, kind, package]`), each stack as
-/// `[cause, pid, microseconds, [frame indices from the root]]`, and the
-/// process names. The heaviest `max` stacks are kept.
-pub fn flame_json(st: &Stacks, max: usize) -> String {
-    use crate::out::esc;
-    // (cause, pid, frames leaf first)
+/// The frame that ends a stack cut short by `flame_json`.
+pub const SMALLER: &str = "(smaller stacks)";
+
+/// A flame graph's stacks within a budget: each cause's heaviest stacks
+/// whole, the rest cut down to their callers until they fit, so that no
+/// time is lost. Stacks are `(cause, pid, frames leaf first, ns)`; a cut
+/// one ends in `None`.
+fn fit_stacks(st: &Stacks, max: usize) -> Vec<(Cat, i32, Vec<Option<usize>>, f64)> {
     type Key<'a> = (Cat, i32, &'a [usize]);
     let mut agg: HashMap<Key, f64> = HashMap::new();
     for s in &st.samples {
         *agg.entry((s.cat, s.pid, s.frames.as_slice())).or_default() += s.ns;
     }
-    let mut v: Vec<(Key, f64)> = agg.into_iter().filter(|x| x.1 >= 1000.0).collect();
-    v.sort_by(|a, b| b.1.total_cmp(&a.1));
-    v.truncate(max);
-    let mut ids: HashMap<usize, usize> = HashMap::new();
-    let mut used: Vec<usize> = Vec::new();
+    let mut total: HashMap<Cat, f64> = HashMap::new();
+    for (k, ns) in &agg {
+        *total.entry(k.0).or_default() += ns;
+    }
+    // Heaviest first within its own cause, so that a big cause (idle,
+    // often) does not take every place from a small one.
+    let share = |k: &Key, ns: f64| ns / total[&k.0].max(1.0);
+    let mut v: Vec<(Key, f64)> = agg.into_iter().collect();
+    v.sort_by(|a, b| share(&b.0, b.1).total_cmp(&share(&a.0, a.1)));
+    let whole = |v: &[(Key, f64)]| -> Vec<(Cat, i32, Vec<Option<usize>>, f64)> {
+        v.iter()
+            .map(|((c, p, fr), ns)| (*c, *p, fr.iter().map(|&i| Some(i)).collect(), *ns))
+            .collect()
+    };
+    if v.len() <= max {
+        return whole(&v);
+    }
+    let room = (max / 4).max(1);
+    let keep = max.saturating_sub(room);
+    let rest = &v[keep..];
+    // Each stack cut to its root-most `d` frames.
+    let cut = |d: usize| -> HashMap<(Cat, i32, &[usize]), f64> {
+        let mut m: HashMap<(Cat, i32, &[usize]), f64> = HashMap::new();
+        for ((c, p, fr), ns) in rest {
+            *m.entry((*c, *p, &fr[fr.len().saturating_sub(d)..])).or_default() += ns;
+        }
+        m
+    };
+    // The deepest cut that fits.
+    let deepest = rest.iter().map(|x| x.0 .2.len()).max().unwrap_or(0);
+    let (mut lo, mut hi) = (0, deepest);
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if cut(mid).len() <= room {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    let mut folded: Vec<_> = cut(lo).into_iter().collect();
+    // Even cut to nothing, more processes than room: the lightest go.
+    folded.sort_by(|a, b| b.1.total_cmp(&a.1));
+    folded.truncate(room);
+    let mut out = whole(&v[..keep]);
+    out.extend(folded.into_iter().map(|((c, p, fr), ns)| {
+        let mut f: Vec<Option<usize>> = vec![None];
+        f.extend(fr.iter().map(|&i| Some(i)));
+        (c, p, f, ns)
+    }));
+    out
+}
+
+/// Every stack, for a flame graph, as JSON: each frame once
+/// (`[func, module, file, line, kernel, kind, package]`), each stack as
+/// `[cause, pid, microseconds, [frame indices from the root]]`, and the
+/// process names. At most `max` stacks: the lighter ones end early, in a
+/// `SMALLER` frame that stands for what they called.
+pub fn flame_json(st: &Stacks, max: usize) -> String {
+    use crate::out::esc;
+    let mut v = fit_stacks(st, max);
+    v.retain(|x| x.3 >= 1000.0);
+    v.sort_by(|a, b| b.3.total_cmp(&a.3));
+    let mut ids: HashMap<Option<usize>, usize> = HashMap::new();
+    let mut used: Vec<Option<usize>> = Vec::new();
     let stacks: Vec<String> = v
         .iter()
-        .map(|((c, pid, fr), ns)| {
+        .map(|(c, pid, fr, ns)| {
             let f: Vec<String> = fr
                 .iter()
                 .rev()
@@ -679,7 +755,10 @@ pub fn flame_json(st: &Stacks, max: usize) -> String {
         .collect();
     let frames: Vec<String> = used
         .iter()
-        .map(|&i| {
+        .map(|i| {
+            let Some(i) = *i else {
+                return format!("[{},\"\",null,null,false,\"unknown\",null]", esc(SMALLER));
+            };
             let f = &st.frames[i];
             let (kind, pkg) = origin(f);
             format!(
@@ -694,7 +773,7 @@ pub fn flame_json(st: &Stacks, max: usize) -> String {
             )
         })
         .collect();
-    let mut pids: Vec<i32> = v.iter().map(|x| x.0 .1).collect();
+    let mut pids: Vec<i32> = v.iter().map(|x| x.1).collect();
     pids.sort_unstable();
     pids.dedup();
     let procs: Vec<String> = pids
@@ -856,6 +935,53 @@ mod tests {
         assert_eq!(h.leaf.as_ref().unwrap().func, "writev");
         assert_eq!(h.via.as_ref().unwrap().func, "tokio::io::poll_evented::PollEvented<E>::poll_write");
         assert!(crate::out::where_text(h, Cat::Cpu).starts_with("100% in writev via PollEvented::poll_write, called from svc::conn::flush"));
+    }
+
+    #[test]
+    fn flame_fits_without_losing_time() {
+        let mut st = Stacks::new("ebpf");
+        let root = st.intern(f("main", "app"));
+        let mid: Vec<usize> = (0..40).map(|i| st.intern(f(&format!("mid{i}"), "app"))).collect();
+        let leaf: Vec<usize> = (0..50).map(|i| st.intern(f(&format!("leaf{i}"), "app"))).collect();
+        // 2000 small CPU stacks and one huge idle one.
+        for (i, &m) in mid.iter().enumerate() {
+            for (j, &l) in leaf.iter().enumerate() {
+                st.add(1, 1, Cat::Cpu, vec![l, m, root], 1e6 + (i * 50 + j) as f64);
+            }
+        }
+        st.add(1, 2, Cat::Idle, vec![root], 1e12);
+        let want: f64 = st.samples.iter().filter(|s| s.cat == Cat::Cpu).map(|s| s.ns).sum();
+        let v = fit_stacks(&st, 400);
+        assert!(v.len() <= 400);
+        let got: f64 = v.iter().filter(|x| x.0 == Cat::Cpu).map(|x| x.3).sum();
+        assert!((got - want).abs() < 1.0, "{got} vs {want}");
+        // The idle stack is not given every place, and is still there.
+        assert_eq!(v.iter().filter(|x| x.0 == Cat::Idle).count(), 1);
+        // The heaviest CPU stack is whole; cut ones end in SMALLER and keep
+        // their callers.
+        assert!(v.iter().any(|x| x.2 == vec![Some(leaf[49]), Some(mid[39]), Some(root)]));
+        let cut: Vec<_> = v.iter().filter(|x| x.2[0].is_none()).collect();
+        assert!(!cut.is_empty());
+        assert!(cut.iter().all(|x| x.2.last() == Some(&Some(root))));
+        let j = flame_json(&st, 400);
+        assert!(j.contains(SMALLER));
+        // Nothing to cut: every stack whole.
+        assert!(fit_stacks(&st, 5000).iter().all(|x| x.2[0].is_some()));
+    }
+
+    #[test]
+    fn python_waits_for_events() {
+        let py = |n: &str| Frame { func: n.into(), module: "[python]".into(), ..Frame::default() };
+        let c = |n: &str| f(n, "python3.13");
+        let lock = c("lock_PyThread_acquire_lock");
+        // Event.wait in a test server: waiting for a signal.
+        assert!(python_event_wait(&[lock.clone(), py("Condition.wait"), py("Event.wait"), py("Server.run")]));
+        assert!(python_event_wait(&[lock.clone(), py("Thread._wait_for_tstate_lock"), py("Thread.join")]));
+        // A semaphore's slots, and `with self._lock:`, are fought over.
+        assert!(!python_event_wait(&[lock.clone(), py("Condition.wait"), py("Semaphore.acquire")]));
+        assert!(!python_event_wait(&[lock.clone(), py("Pool.get_conn")]));
+        // No Python frames: cannot tell.
+        assert!(!python_event_wait(&[lock]));
     }
 
     #[test]

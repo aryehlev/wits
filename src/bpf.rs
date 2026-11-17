@@ -180,6 +180,8 @@ pub enum Sz {
 #[allow(dead_code)]
 pub enum Cond {
     Eq = 0x10,
+    /// dst & imm != 0
+    Set = 0x40,
     Ne = 0x50,
     Sgt = 0x60,
     Slt = 0xc0,

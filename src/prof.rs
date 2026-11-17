@@ -3,7 +3,7 @@
 //! them from being complete.
 
 use crate::answer::Cat;
-use crate::code::{is_runtime, Frame, Stacks};
+use crate::code::{is_runtime, python_event_wait, Frame, Stacks};
 use crate::ebpf::RawStack;
 use crate::lang;
 use crate::symbolize::Symbolizer;
@@ -51,6 +51,16 @@ pub fn is_lock_frame(f: &Frame) -> bool {
     LOCK_FUNCS.iter().any(|p| f.func.contains(p))
 }
 
+/// Whether a user stack (leaf first) is queued on a lock.
+fn lock_wait(u: &[Frame]) -> bool {
+    match u.iter().take(8).find(|f| is_lock_frame(f)) {
+        // Python waits for events through its locks; the GIL is real.
+        Some(f) if f.func.contains("PyThread_acquire_lock") => !python_event_wait(u),
+        Some(_) => true,
+        None => false,
+    }
+}
+
 /// What an off-CPU span was, from the task state it left the CPU in and
 /// the kernel and user functions it was in.
 pub fn classify_off(state: u32, k: &[Frame], u: &[Frame]) -> Cat {
@@ -73,7 +83,7 @@ pub fn classify_off(state: u32, k: &[Frame], u: &[Frame]) -> Cat {
         return Cat::Lock;
     }
     if has(&["futex"]) {
-        return if u.iter().take(8).any(is_lock_frame) {
+        return if lock_wait(u) {
             Cat::Lock
         } else {
             Cat::Idle
@@ -96,7 +106,7 @@ pub fn classify_off(state: u32, k: &[Frame], u: &[Frame]) -> Cat {
 /// scheduler tracepoint), the system call wrapper on top of the user stack
 /// says what the thread waits for.
 fn classify_by_user(s: u32, u: &[Frame]) -> Cat {
-    if u.iter().take(8).any(is_lock_frame) {
+    if lock_wait(u) {
         return Cat::Lock;
     }
     let d = s & 0x02 != 0 && s & 0x80 == 0;
@@ -283,6 +293,24 @@ pub fn stacks(inp: Inputs, sym: &mut Symbolizer) -> Stacks {
     if inp.raw.is_some() {
         st.scale_to(Cat::Cpu, inp.cpu_ns);
         st.scale_to(Cat::CpuWait, inp.rq_ns);
+        // The measurements say how long each process waited for each cause
+        // and the stacks say where: where the two tell the cause apart
+        // differently (the GIL is a condition variable to the kernel), the
+        // stacks follow the totals the report shows.
+        if let Some(m) = &inp.measured {
+            let mut have: HashMap<(i32, Cat), f64> = HashMap::new();
+            for s in st.samples.iter().filter(|s| !matches!(s.cat, Cat::Cpu | Cat::CpuWait | Cat::Idle)) {
+                *have.entry((s.pid, s.cat)).or_default() += s.ns;
+            }
+            for s in st.samples.iter_mut() {
+                let key = (s.pid, s.cat);
+                if let (Some(&h), Some(&want)) = (have.get(&key), m.get(&key)) {
+                    if h > 0.0 && want > 0.0 {
+                        s.ns *= want / h;
+                    }
+                }
+            }
+        }
     }
     if let Some(why) = &inp.why_no_cpu {
         if inp.cpu_ns > 0.0 {
@@ -371,5 +399,18 @@ mod tests {
         assert_eq!(classify_off(2, &[], &u(&["fsync", "main"])), Cat::Disk);
         assert_eq!(classify_off(1, &[], &u(&["clock_nanosleep", "main"])), Cat::Idle);
         assert_eq!(classify_off(1, &[], &u(&["pthread_cond_wait", "main"])), Cat::Idle);
+        // Python: Event.wait goes through a lock, but waits for a signal;
+        // the GIL is a lock even though it is a condition variable.
+        let py = |n: &str| Frame { func: n.into(), module: "[python]".into(), ..Frame::default() };
+        let mut ev = u(&["_PySemaphore_Wait", "_PyParkingLot_Park", "_PyMutex_LockTimed", "lock_PyThread_acquire_lock"]);
+        ev.extend([py("Condition.wait"), py("Event.wait"), py("Server.run")]);
+        assert_eq!(classify_off(1, &k(&["__schedule", "futex_wait_queue"]), &ev), Cat::Idle);
+        assert_eq!(classify_off(1, &[], &ev), Cat::Idle);
+        let mut held = u(&["_PySemaphore_Wait", "_PyParkingLot_Park", "_PyMutex_LockTimed", "lock_PyThread_acquire_lock"]);
+        held.push(py("Pool.get_conn"));
+        assert_eq!(classify_off(1, &k(&["__schedule", "futex_wait_queue"]), &held), Cat::Lock);
+        let mut gil = u(&["pthread_cond_timedwait", "take_gil", "PyEval_RestoreThread", "lock_PyThread_acquire_lock"]);
+        gil.extend([py("Condition.wait"), py("Event.wait")]);
+        assert_eq!(classify_off(1, &k(&["__schedule", "futex_wait_queue"]), &gil), Cat::Lock);
     }
 }

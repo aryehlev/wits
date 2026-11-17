@@ -406,12 +406,13 @@ pub const LOCK_FUNCS: &[&str] = &[
 fn lock_name(frames: &[Frame]) -> Option<String> {
     for f in frames.iter().take(12) {
         let n = f.func.as_str();
-        if n.contains("take_gil") || n.contains("PyThread_acquire_lock") {
-            return Some(if n.contains("take_gil") {
-                "the Python GIL".into()
-            } else {
-                "a Python lock".into()
-            });
+        if n.contains("take_gil") {
+            return Some("the Python GIL".into());
+        }
+        if n.contains("PyThread_acquire_lock") {
+            // Event.wait, Queue.get, Thread.join: waiting for something
+            // to happen.
+            return (!crate::code::python_event_wait(frames)).then(|| "a Python lock".into());
         }
         if n.contains("rwlock") || n.contains("RwLock") || n.contains("raw_rwlock") {
             return Some("a read-write lock".into());

@@ -156,6 +156,11 @@ fn prog_offcpu(
         .rsh_imm(R8, 32)
         .jmp_imm(Cond::Eq, R7, 0, "next");
     filter(&mut a, targets, "next", "hit");
+    // A task leaving the CPU for the last time (EXIT_DEAD, EXIT_ZOMBIE)
+    // never comes back: its span would never end, and would count as idle
+    // until the end of the session.
+    a.ldx(Sz::W, R1, R6, prev_state_off)
+        .jmp_imm(Cond::Set, R1, 0x30, "next");
     // start value {ts u64, ustack, kstack, tgid, state, lr u64} at -40
     a.stx(Sz::Dw, R10, -40, R9)
         .mov(R1, R6)
