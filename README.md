@@ -195,9 +195,18 @@ sudo wits run --html run.html -- ./server --selftest
   and what they spend the time in. wits tells your code apart from
   dependencies, the language's standard library, the C library and the
   kernel, for Rust, Go, C and C++, Python, Node, Java, Ruby and .NET.
-- **Explore.** An animated flame graph: click to zoom, hover to light up a
-  function everywhere it appears, search, and **Only my code** to fold away
-  the runtime between your functions. **Top functions** ranks them, **By
+- **Dive.** The call tree as an ocean: the program starts at the surface,
+  every call is a step deeper, and more time is wider. Your functions glow,
+  and time bubbles up from where it is spent, fast for CPU and slowly for
+  waits. **Follow the heat** swims down to where wits says to start; drag to
+  swim, scroll to dive, click a function to dive into it, and the sonar shows
+  where you are.
+
+  ![the dive: the call tree as an ocean, following the heat down to the hottest function](demo/dive.png)
+
+- **Explore.** The same time as an animated flame graph: click to zoom, hover
+  to light up a function everywhere it appears, search, and **Only my code**
+  to fold away the runtime between your functions. **Top functions** ranks them, **By
   package** shows whose code the time is in, and clicking any function shows
   who calls it, what it calls and its hot lines.
 - **Ask your agent.** One button writes a prompt with the answer and the

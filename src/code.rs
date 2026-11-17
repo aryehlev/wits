@@ -664,8 +664,10 @@ pub const SMALLER: &str = "(smaller stacks)";
 
 /// A flame graph's stacks within a budget: each cause's heaviest stacks
 /// whole, the rest cut down to their callers until they fit, so that no
-/// time is lost. Stacks are `(cause, pid, frames leaf first, ns)`; a cut
-/// one ends in `None`.
+/// time is lost. A stack is first cut below its deepest function of the
+/// program's own code (what is under it is libraries and the runtime), and
+/// only then, if that is not enough, nearer the root. Stacks are
+/// `(cause, pid, frames leaf first, ns)`; a cut one ends in `None`.
 fn fit_stacks(st: &Stacks, max: usize) -> Vec<(Cat, i32, Vec<Option<usize>>, f64)> {
     type Key<'a> = (Cat, i32, &'a [usize]);
     let mut agg: HashMap<Key, f64> = HashMap::new();
@@ -691,12 +693,27 @@ fn fit_stacks(st: &Stacks, max: usize) -> Vec<(Cat, i32, Vec<Option<usize>>, f64
     }
     let room = (max / 4).max(1);
     let keep = max.saturating_sub(room);
-    let rest = &v[keep..];
-    // Each stack cut to its root-most `d` frames.
-    let cut = |d: usize| -> HashMap<(Cat, i32, &[usize]), f64> {
-        let mut m: HashMap<(Cat, i32, &[usize]), f64> = HashMap::new();
-        for ((c, p, fr), ns) in rest {
-            *m.entry((*c, *p, &fr[fr.len().saturating_sub(d)..])).or_default() += ns;
+    let mut app: HashMap<usize, bool> = HashMap::new();
+    let rest: Vec<(Key, f64, bool)> = v[keep..]
+        .iter()
+        .map(|&((c, p, fr), ns)| {
+            let own = fr
+                .iter()
+                .position(|&i| *app.entry(i).or_insert_with(|| origin(&st.frames[i]).0 == Kind::App));
+            match own {
+                Some(at) if at > 0 => ((c, p, &fr[at..]), ns, true),
+                _ => ((c, p, fr), ns, false),
+            }
+        })
+        .collect();
+    // Each stack cut to its root-most `d` frames: (time, whether any was cut).
+    let cut = |d: usize| -> HashMap<(Cat, i32, &[usize]), (f64, bool)> {
+        let mut m: HashMap<(Cat, i32, &[usize]), (f64, bool)> = HashMap::new();
+        for ((c, p, fr), ns, was) in &rest {
+            let short = &fr[fr.len().saturating_sub(d)..];
+            let e = m.entry((*c, *p, short)).or_default();
+            e.0 += ns;
+            e.1 |= *was || short.len() < fr.len();
         }
         m
     };
@@ -713,11 +730,11 @@ fn fit_stacks(st: &Stacks, max: usize) -> Vec<(Cat, i32, Vec<Option<usize>>, f64
     }
     let mut folded: Vec<_> = cut(lo).into_iter().collect();
     // Even cut to nothing, more processes than room: the lightest go.
-    folded.sort_by(|a, b| b.1.total_cmp(&a.1));
+    folded.sort_by(|a, b| b.1 .0.total_cmp(&a.1 .0));
     folded.truncate(room);
     let mut out = whole(&v[..keep]);
-    out.extend(folded.into_iter().map(|((c, p, fr), ns)| {
-        let mut f: Vec<Option<usize>> = vec![None];
+    out.extend(folded.into_iter().map(|((c, p, fr), (ns, was))| {
+        let mut f: Vec<Option<usize>> = if was { vec![None] } else { Vec::new() };
         f.extend(fr.iter().map(|&i| Some(i)));
         (c, p, f, ns)
     }));
@@ -967,6 +984,29 @@ mod tests {
         assert!(j.contains(SMALLER));
         // Nothing to cut: every stack whole.
         assert!(fit_stacks(&st, 5000).iter().all(|x| x.2[0].is_some()));
+    }
+
+    #[test]
+    fn flame_cuts_below_your_code_first() {
+        let mut st = Stacks::new("ebpf");
+        let root = st.intern(f("main", "app"));
+        let mine: Vec<usize> = (0..20).map(|i| st.intern(f(&format!("work{i}"), "app"))).collect();
+        let libc: Vec<usize> = (0..100).map(|i| st.intern(f(&format!("memcpy{i}"), "libc.so.6"))).collect();
+        assert_eq!(origin(&st.frames[libc[0]]).0, Kind::Sys);
+        for &m in &mine {
+            for &l in &libc {
+                st.add(1, 1, Cat::Cpu, vec![l, m, root], 1e6);
+            }
+        }
+        // 2000 stacks into 200: the cut ones still name the function of
+        // yours they were in.
+        let v = fit_stacks(&st, 200);
+        assert!(v.len() <= 200);
+        let cut: Vec<_> = v.iter().filter(|x| x.2[0].is_none()).collect();
+        assert!(!cut.is_empty());
+        assert!(cut.iter().all(|x| x.2.len() == 3 && mine.iter().any(|m| x.2[1] == Some(*m))));
+        let got: f64 = v.iter().map(|x| x.3).sum();
+        assert!((got - 2000.0 * 1e6).abs() < 1.0);
     }
 
     #[test]

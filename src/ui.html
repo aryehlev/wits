@@ -156,6 +156,26 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .fn.outside { background-image: repeating-linear-gradient(135deg, transparent 0 7px, rgba(255, 255, 255, .13) 7px 14px); }
 .fn.gone { opacity: 0 !important; pointer-events: none; }
 @keyframes fadein { from { opacity: 0; } }
+
+/* the dive */
+.dive { position: relative; border-radius: 14px; overflow: hidden; background: #06121c; user-select: none; -webkit-user-select: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06); }
+.dive-c { display: block; width: 100%; height: 520px; cursor: grab; touch-action: none; outline: none; }
+.dive-c.grab { cursor: grabbing; }
+.dive-c:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.dive-zone { position: absolute; left: 10px; top: 9px; font-size: 10.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: rgba(255, 255, 255, .82); background: rgba(4, 16, 26, .5); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); border-radius: 8px; padding: 3px 8px; pointer-events: none; }
+.dive-hud { position: absolute; right: 10px; top: 8px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 200px); }
+.dive-hud button { border: 1px solid rgba(255, 255, 255, .2); background: rgba(4, 16, 26, .5); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); color: #eaf6ff; border-radius: 10px; padding: 5px 11px; font-size: 12.5px; cursor: pointer; transition: background .15s, transform .12s; }
+.dive-hud button:hover { background: rgba(4, 16, 26, .75); transform: translateY(-1px); }
+.dive-hud button.primary { background: linear-gradient(135deg, hsl(22 92% 56%), hsl(338 80% 56%)); border-color: transparent; font-weight: 650; box-shadow: 0 4px 16px rgba(255, 90, 60, .35); }
+.dive-hud button.primary:hover { filter: brightness(1.08); }
+.dive-map { position: absolute; right: 10px; bottom: 10px; width: 180px; height: 112px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .16); background: rgba(2, 8, 14, .62); cursor: crosshair; touch-action: none; }
+.dive-say { position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 214px); width: fit-content; color: #fff; font-size: 13px; line-height: 1.4; background: rgba(4, 16, 26, .62); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); border-radius: 10px; padding: 7px 11px; pointer-events: none; opacity: 0; transition: opacity .3s; overflow-wrap: anywhere; }
+.dive-say .dim { opacity: .72; }
+.dive-hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(0, 0, 0, .62); color: #fff; padding: 8px 14px; border-radius: 10px; font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; white-space: nowrap; }
+.dive-hint.on { opacity: 1; }
+.dive-spots { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.dive-spots:empty { display: none; }
+.dive-spots .pill { padding: 3px 10px; font-size: 12px; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; font-size: 12px; }
 .legend button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 3px 8px; cursor: pointer; color: var(--muted); }
 .legend button:hover { background: var(--surface-2); color: var(--fg); }
@@ -251,6 +271,9 @@ canvas.confetti { position: fixed; inset: 0; pointer-events: none; z-index: 40; 
   .side { position: static; }
 }
 @media (max-width: 640px) {
+  .dive-map { width: 116px; height: 74px; bottom: 58px; }
+  .dive-say { max-width: calc(100% - 144px); font-size: 12px; bottom: 58px; }
+  .dive-hud { position: static; max-width: none; justify-content: flex-start; padding: 8px 10px 10px; }
   .hero { grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 14px; }
   .headline { font-size: 21px; }
   .card { padding: 14px; border-radius: 14px; }
@@ -530,12 +553,15 @@ function model(fl) {
 
 // ---------------------------------------------------------------- the explorer
 let activeEx = null;
+const CANVAS = !!document.createElement("canvas").getContext;
+// The frame that ends a stack wits cut short to fit (code::SMALLER).
+const SMALLER = "(smaller stacks)";
 function explorer(M, opts = {}) {
   const F = M.frames;
   const present = CAUSES.filter(c => M.totals[c] > 0);
   const st = {
     causes: new Set(present.filter(c => c !== "idle")), pids: null, pidLabel: "", pkg: null, kindHi: null,
-    mine: M.hasApp, view: "flame", q: "", sel: null, focus: "", sort: "self", hover: null,
+    mine: M.hasApp, view: CANVAS ? "dive" : "flame", q: "", sel: null, focus: "", sort: "self", hover: null,
   };
   if (!st.causes.size) st.causes = new Set(present);
   if (opts.cause && present.includes(opts.cause)) st.causes = new Set([opts.cause]);
@@ -645,12 +671,12 @@ function explorer(M, opts = {}) {
     }));
     causeBtns.forEach(b => b.title = "Click to show or hide; shift-click to show only this");
     const views = el("div", { class: "seg", role: "group", "aria-label": "View" },
-      [["flame", "Flame graph"], ["top", "Top functions"], ["pkg", "By package"]].map(([v, t]) =>
-        el("button", { "aria-pressed": String(st.view === v), onclick: () => { st.view = v; renderToolbar(); renderMain(); } }, t)));
+      [...(CANVAS ? [["dive", "Dive"]] : []), ["flame", "Flame graph"], ["top", "Top functions"], ["pkg", "By package"]].map(([v, t]) =>
+        el("button", { "aria-pressed": String(st.view === v), onclick: () => { st.view = v; renderToolbar(); renderMain(); renderSide(); } }, t)));
     const mine = M.hasApp ? el("button", { class: "switch", role: "switch", "aria-checked": String(st.mine), title: "Hide the standard library, dependencies and the kernel between your functions (m)",
       onclick: () => { st.mine = !st.mine; update(); } }, el("span", { class: "track" }), "Only my code") : null;
     const input = el("input", { type: "search", placeholder: "Search functions, files, packages", value: st.q, "aria-label": "Search",
-      oninput: e => { st.q = e.target.value.trim().toLowerCase(); paint(); if (st.view !== "flame") renderMain(); } });
+      oninput: e => { st.q = e.target.value.trim().toLowerCase(); paint(); if (st.view !== "flame" && st.view !== "dive") renderMain(); } });
     put(toolbar, el("div", { class: "pills", style: "margin:0" }, causeBtns), el("div", { class: "spacer" }), mine, views,
       el("label", { class: "search" }, el("span", { html: ICON.search }), input, st.q ? null : el("kbd", {}, "/")));
     toolbar._input = input;
@@ -718,9 +744,9 @@ function explorer(M, opts = {}) {
     paint();
   }
   function paint() {
+    if (st.view === "dive") { dive.kick(); searchInfo(); return; }
     if (st.view !== "flame") return;
     const any = !!(st.q || st.kindHi);
-    let hitUs = 0;
     for (const e of els.values()) {
       const n = e._n;
       const m = any && matches(n);
@@ -729,6 +755,10 @@ function explorer(M, opts = {}) {
       e.classList.toggle("sel", !!st.sel && n.frame?.fn === st.sel);
       e.classList.toggle("same", !!st.hover && n.frame?.fn === st.hover && st.hover !== st.sel);
     }
+    searchInfo();
+  }
+  function searchInfo() {
+    let hitUs = 0;
     if (st.q) {
       // time in stacks that pass through a match
       const q = st.q;
@@ -752,7 +782,7 @@ function explorer(M, opts = {}) {
     if (n === focus) zoom(n.parent || tree); else zoom(n);
     if (n.frame) select(n.frame.fn, false);
   });
-  function showTip(ev, n) {
+  function showTip(ev, n, hint) {
     const f = n.frame, total = tree.us || 1;
     const multi = Object.keys(n.by).length > 1;
     put(tip, 
@@ -764,12 +794,515 @@ function explorer(M, opts = {}) {
       n.hidden ? el("div", { class: "t3" }, n.kind === "outside" ? `no function of yours in these stacks; ${n.hidden} frames in ${n.pkgs.join(", ")}` : `+${n.hidden} more frame${n.hidden > 1 ? "s" : ""} inside ${n.pkgs.join(", ")}`) : null,
       el("div", { class: "t3" }, el("b", {}, usec(n.us)), ` · ${pct(n.us / total)} of what is shown`, n.parent && n.parent.kind !== "root" ? ` · ${pct(n.us / n.parent.us)} of its caller` : ""),
       multi ? el("div", { class: "minibar", style: "width:160px" }, CAUSES.filter(c => n.by[c]).map(c => el("i", { style: `width:${n.by[c] / n.us * 100}%;background:${causeColor(c)}` }))) : null,
-      el("div", { class: "th" }, (index.get(st.focus) || tree) === n ? "click to zoom out" : "click to zoom in and see its details"));
+      el("div", { class: "th" }, hint || ((index.get(st.focus) || tree) === n ? "click to zoom out" : "click to zoom in and see its details")));
     tip.style.display = "block";
     const x = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 10);
     const y = ev.clientY + 18 + tip.offsetHeight > innerHeight ? ev.clientY - tip.offsetHeight - 12 : ev.clientY + 18;
     tip.style.left = Math.max(8, x) + "px"; tip.style.top = Math.max(8, y) + "px";
   }
+
+  // ---- the dive: the call tree as an ocean. The program starts at the
+  // surface and every call is a step deeper; width is time. Your functions
+  // glow, and where time is spent it bubbles up through the callers: fast
+  // for CPU, slowly for waits.
+  const dive = (() => {
+    const RH = 30;
+    const cv = el("canvas", { class: "dive-c", tabindex: "0", role: "img", "aria-label": "The call tree as an ocean: the program's entry at the surface, the functions it calls below it, width is time. Drag to swim, scroll to dive, click a function to dive into it, Escape to come up." });
+    const zoneEl = el("div", { class: "dive-zone" });
+    const sayEl = el("div", { class: "dive-say" });
+    const hintEl = el("div", { class: "dive-hint" });
+    const mm = el("canvas", { class: "dive-map", title: "Sonar: the whole tree. Click or drag to swim there." });
+    const btn = (label, title, fn, cls) => el("button", { class: cls || null, title, onclick: e => { e.stopPropagation(); autoRan = true; fn(); } }, label);
+    const hud = el("div", { class: "dive-hud" },
+      btn("Follow the heat", "Dive down the path that takes the most time (f)", () => follow(), "primary"),
+      btn("Surface", "Back to the top (Esc comes up one level)", () => { stopGuide(); fit(tree); }),
+      btn("−", "Zoom out (-)", () => zoomBy(1.6)), btn("+", "Zoom in (+)", () => zoomBy(1 / 1.6)));
+    const wrap = el("div", { class: "dive" }, cv, zoneEl, sayEl, hintEl, hud, mm);
+    const spots = el("div", { class: "dive-spots" });
+    const box = el("div", {}, spots, wrap,
+      el("div", { class: "hintline" }, "Drag to swim · click the water, then scroll to dive · pinch or ⌘/Ctrl-scroll to zoom · click a function to dive into it · Esc to come up"));
+    const cam = { x0: -0.02, x1: 1.02, y: -1.25 }, tgt = { ...cam };
+    let W = 800, H = 520, dpr = 1, maxD = 1, vents = [], laidFor = null, focusNode = null, snowY = cam.y;
+    let raf = 0, last = 0, lastDraw = 0, t = 0, visible = !("IntersectionObserver" in window), engaged = false;
+    let guided = null, fling = null, autoRan = false, dirty = true, mapW = 180, mapH = 112, hot = [];
+    const mapC = document.createElement("canvas");
+    const bubbles = [];
+    const snow = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), z: 0.3 + Math.random() * 0.7, r: 0.5 + Math.random() * 1.3 }));
+    const dark = () => { const th = document.documentElement.dataset.theme; return th ? th === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
+    // water from the surface (0) to the deepest frame (1)
+    const DEEP = { light: [[0, 190, 62, 58], [0.22, 198, 62, 36], [0.5, 210, 58, 19], [1, 222, 60, 7]], dark: [[0, 196, 62, 25], [0.22, 204, 58, 15], [0.5, 214, 52, 9], [1, 224, 50, 4]] };
+    function water(f) {
+      const s = DEEP[dark() ? "dark" : "light"]; f = Math.max(0, Math.min(1, f));
+      let i = 0; while (i < s.length - 2 && f > s[i + 1][0]) i++;
+      const a = s[i], b = s[i + 1], k = (f - a[0]) / (b[0] - a[0] || 1);
+      return `hsl(${a[1] + (b[1] - a[1]) * k}, ${a[2] + (b[2] - a[2]) * k}%, ${a[3] + (b[3] - a[3]) * k}%)`;
+    }
+    function tone(n) {
+      if (n._tone) return n._tone;
+      const h = hash(n.frame?.fn || n.label), j = (h % 7) - 3;
+      let c;
+      switch (n.kind) {
+        case "app": { const k = domCause(n); c = { h: HUE[k] + (h >> 4) % 10 - 5, s: k === "idle" ? 20 : 80, l: 47 + j }; break; }
+        case "lib": c = { h: 188 + hash(n.frame?.pk || "") % 44, s: 46, l: 37 + j }; break;
+        case "std": c = { h: 210, s: 24, l: 37 + j }; break;
+        case "sys": c = { h: 218, s: 16, l: 33 + j }; break;
+        case "kernel": c = { h: 252, s: 22, l: 35 + j }; break;
+        case "outside": c = { h: 205, s: 20, l: 35 }; break;
+        case "proc": c = { h: 228, s: 30, l: 31 }; break;
+        case "root": c = { h: 196, s: 44, l: 33 }; break;
+        default: c = { h: 210, s: 8, l: 35 };
+      }
+      return (n._tone = c);
+    }
+    const hsl = (c, l = c.l, a = 1) => `hsla(${c.h}, ${c.s}%, ${l}%, ${a})`;
+
+    function layout() {
+      maxD = 1;
+      (function lay(n, x, w) {
+        n.x = x; n.w = w; n._tone = null;
+        if (n.depth > maxD) maxD = n.depth;
+        n.sorted = [...n.kids.values()].sort((a, b) => b.us - a.us);
+        let cx = x;
+        for (const k of n.sorted) { const kw = n.us ? w * k.us / n.us : 0; lay(k, cx, kw); cx += kw; }
+      })(tree, 0, 1);
+      const total = tree.us || 1;
+      vents = [...index.values()].filter(n => n.kind !== "root" && n.frame?.func !== SMALLER && n.self / total >= 0.01).sort((a, b) => b.self - a.self).slice(0, 40);
+      for (const v of vents) { v.ph = Math.random() * 6.28; v.cause = domCause(v); }
+      bubbles.length = 0;
+      laidFor = tree;
+      drawMap();
+      // Hot spots: wits's own list, made from every stack, for the causes
+      // shown; else counted here as wits counts them, time going to the
+      // nearest function of yours above where it is spent (with no code of
+      // yours, to the code that waits rather than the kernel's scheduler).
+      hot = [];
+      const listed = (opts.code?.causes || []).filter(c => st.causes.has(c.cause));
+      if (listed.length && !st.pids && !st.pkg) {
+        const best = new Map(), sum = new Map();
+        for (const n of index.values()) if (n.frame && (!best.has(n.frame.fn) || n.us > best.get(n.frame.fn).us)) best.set(n.frame.fn, n);
+        for (const c of listed) for (const h of c.hot || []) { const k = fnKey(h.frame.func, h.frame.module); sum.set(k, (sum.get(k) || 0) + h.seconds * 1e6); }
+        hot = [...sum].filter(([k]) => best.has(k)).map(([k, us]) => ({ n: best.get(k), us })).sort((x, y) => y.us - x.us).slice(0, 5);
+      }
+      const acc = new Map();
+      for (const n of index.values()) {
+        // A stack cut short says nothing about which of your functions.
+        if (!(n.self > 0) || n.frame?.func === SMALLER) continue;
+        let a = n; while (a && a.kind !== "app") a = a.parent;
+        if (!a) { a = n; while ((a.kind === "kernel" || a.frame?.func === SMALLER) && a.parent && a.parent.kind !== "root") a = a.parent; }
+        if (!a.frame || a.frame.func === SMALLER) continue;
+        const e = acc.get(a.frame.fn) || { n: a, us: 0 };
+        e.us += n.self; if (a.us > e.n.us) e.n = a;
+        acc.set(a.frame.fn, e);
+      }
+      if (!hot.length) hot = [...acc.values()].sort((x, y) => y.us - x.us).slice(0, 5);
+      hot = hot.filter((h, i) => !i || h.us / total >= 0.01);
+      put(spots, hot.length ? el("span", { class: "muted", style: "font-size:12.5px;margin-right:2px" }, "Hot spots") : null,
+        hot.map(({ n, us }) => causePill(domCause(n), [n.label.length > 38 ? n.label.slice(0, 37) + "…" : n.label, " ", el("b", {}, pct(us / total))], null, () => { autoRan = true; stopGuide(); flyTo(n); })));
+    }
+    // After the filters change, the tree is new: lay it out before use.
+    function ready() { if (laidFor !== tree && tree) layout(); }
+    function drawMap() {
+      const r = mm.getBoundingClientRect();
+      mapW = Math.round(r.width) || 180; mapH = Math.round(r.height) || 112;
+      mm.width = mapC.width = mapW * dpr; mm.height = mapC.height = mapH * dpr;
+      const g = mapC.getContext("2d");
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, mapW, mapH);
+      const rh = mapH / (maxD + 1.5);
+      (function walk(n) {
+        const w = n.w * mapW; if (w < 0.35) return;
+        g.fillStyle = hsl(tone(n), Math.min(72, tone(n).l + 14));
+        g.fillRect(n.x * mapW, (n.depth + 0.5) * rh, Math.max(0.35, w - 0.3), Math.max(0.6, rh - 0.4));
+        for (const k of n.sorted) walk(k);
+      })(tree);
+      dirty = true;
+    }
+    function resize() {
+      dpr = Math.min(2, devicePixelRatio || 1);
+      W = Math.max(280, wrap.clientWidth || 800);
+      H = Math.round(Math.max(340, Math.min(600, innerHeight * 0.66)));
+      if (matchMedia("(pointer: coarse)").matches) H = Math.min(H, 420);
+      cv.width = W * dpr; cv.height = H * dpr; cv.style.height = H + "px";
+      if (laidFor && laidFor === tree) drawMap();
+      clampT(); kick();
+    }
+    function clampT() {
+      const span = Math.min(1.1, Math.max(2e-7, tgt.x1 - tgt.x0));
+      tgt.x0 = span >= 1.1 ? -0.05 : Math.min(1.05 - span, Math.max(-0.05, tgt.x0));
+      tgt.x1 = tgt.x0 + span;
+      tgt.y = Math.max(-1.25, Math.min(maxD - 0.5, tgt.y));
+    }
+    // Swim to a node: its width fills the view, a few of its callers above it.
+    function fit(n, instant) {
+      if (!n) return;
+      focusNode = n; st.focus = n.pk || "";
+      const m = Math.max(n.w * 0.03, 1e-7);
+      tgt.x0 = n.x - m; tgt.x1 = n.x + n.w + m;
+      tgt.y = n.depth - Math.min(3, Math.floor(H / RH * 0.22)) - (n.depth === 0 ? 1.25 : 0);
+      clampT();
+      if (instant || !motion) Object.assign(cam, tgt);
+      kick();
+    }
+    function flyTo(n) { fit(n); if (n.frame) { st.sel = n.frame.fn; renderSide(); } }
+    function zoomBy(f, mx = W / 2) {
+      const span = tgt.x1 - tgt.x0, at = tgt.x0 + mx / W * span, ns = span * f;
+      tgt.x0 = at - mx / W * ns; tgt.x1 = tgt.x0 + ns; clampT(); kick();
+    }
+    function hitTest(mx, my) {
+      const d = Math.floor(cam.y + my / RH);
+      if (d < 0) return null;
+      const xt = cam.x0 + mx / W * (cam.x1 - cam.x0);
+      let n = tree;
+      if (xt < n.x || xt > n.x + n.w) return null;
+      while (n.depth < d) {
+        const k = (n.sorted || []).find(k => xt >= k.x && xt < k.x + k.w);
+        if (!k) return null;
+        n = k;
+      }
+      return n;
+    }
+    function say(...kids) { put(sayEl, ...kids); sayEl.style.opacity = kids.length ? "1" : "0"; }
+    function hint(s) { hintEl.textContent = s; hintEl.classList.add("on"); clearTimeout(hint.t); hint.t = setTimeout(() => hintEl.classList.remove("on"), 1500); }
+
+    // ---- follow the heat: the child that takes the most time, all the way down
+    function heatPath() {
+      const p = [tree]; let n = tree;
+      while (n.sorted && n.sorted.length) { const k = n.sorted[0]; if (k.us <= 0 || k.us < n.self) break; n = k; p.push(n); }
+      return p;
+    }
+    function follow() {
+      ready(); stopGuide(); fling = null;
+      let path = heatPath();
+      if (hot.length) { path = []; for (let n = hot[0].n; n; n = n.parent) path.unshift(n); }
+      if (path.length < 2) { say("Nothing below the surface to follow."); return; }
+      guided = { path, i: 0, next: performance.now() + 300, step: Math.max(170, Math.min(520, 9000 / path.length)), done: false };
+      fit(path[0]);
+      say(el("b", {}, "Following the heat"), " down the path that takes the most time…");
+      if (!motion) { guided.i = path.length - 1; finish(); }
+      kick();
+    }
+    function advance(now) {
+      if (!guided || guided.done || now < guided.next) return;
+      guided.i++;
+      const n = guided.path[guided.i], total = tree.us || 1;
+      fit(n);
+      const trail = guided.path.slice(1, guided.i + 1).map(x => x.label);
+      say(trail.length > 3 ? "… › " : "", trail.slice(-3).join(" › "), el("span", { class: "dim" }, ` · ${pct(n.us / total)} of the time passes through here`));
+      guided.next = now + guided.step;
+      if (guided.i >= guided.path.length - 1) finish();
+    }
+    function finish() {
+      const n = guided.path[guided.i], total = tree.us || 1;
+      guided.done = true;
+      fit(n);
+      if (n.frame) { st.sel = n.frame.fn; renderSide(); }
+      const h = hot.length && hot[0].n === n ? hot[0].us : n.self;
+      say("Start here: ", el("b", {}, pct(h / total)), " of the time is spent in ", el("b", {}, n.label),
+        n.kind === "app" && h > n.self ? " and what it calls outside your code" : "",
+        n.frame?.file ? el("span", { class: "dim" }, " · " + where(n.frame)) : null,
+        el("span", { class: "dim" }, ` · ${guided.path.length - 1} level${guided.path.length === 2 ? "" : "s"} down`));
+    }
+    function stopGuide() { guided = null; }
+    function up() { stopGuide(); fit(focusNode?.parent || tree); }
+
+    // ---- the animation loop runs only while the dive is on screen
+    function kick() { dirty = true; if (!raf && visible && cv.isConnected) { last = performance.now(); raf = requestAnimationFrame(frame); } }
+    function frame(now) {
+      raf = 0;
+      if (!visible || !cv.isConnected || document.hidden) return;
+      const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000)); last = now; t += dt;
+      advance(now);
+      let moving = false;
+      if (fling) {
+        const bx = tgt.x0, by = tgt.y;
+        tgt.x0 += fling.vx * dt; tgt.x1 += fling.vx * dt; tgt.y += fling.vy * dt; clampT();
+        if (Math.abs(tgt.x0 - bx - fling.vx * dt) > 1e-12) fling.vx = 0;
+        if (Math.abs(tgt.y - by - fling.vy * dt) > 1e-9) fling.vy = 0;
+        Object.assign(cam, tgt);
+        const k = Math.exp(-dt * 3.2); fling.vx *= k; fling.vy *= k;
+        if (Math.abs(fling.vy) < 0.05 && Math.abs(fling.vx) < (tgt.x1 - tgt.x0) * 0.01) fling = null;
+        moving = true;
+      }
+      // Ease toward the target: the span on a log scale, so a deep zoom
+      // feels the same at every depth; the center leads when zooming in,
+      // the span when zooming out, so the target stays in view.
+      const cs = Math.log(cam.x1 - cam.x0), ts = Math.log(tgt.x1 - tgt.x0);
+      const cc = (cam.x0 + cam.x1) / 2, tc = (tgt.x0 + tgt.x1) / 2;
+      const span = tgt.x1 - tgt.x0, near = Math.abs(ts - cs) < 1e-3 && Math.abs(tc - cc) < span * 1e-3 && Math.abs(tgt.y - cam.y) < 1e-3;
+      if (near) Object.assign(cam, tgt);
+      else {
+        const inward = ts < cs, kc = 1 - Math.exp(-dt * (inward ? 8 : 5)), ks = 1 - Math.exp(-dt * (inward ? 4.5 : 8)), ky = 1 - Math.exp(-dt * 6.5);
+        const ns = Math.exp(cs + (ts - cs) * ks), nc = cc + (tc - cc) * kc;
+        cam.x0 = nc - ns / 2; cam.x1 = nc + ns / 2; cam.y += (tgt.y - cam.y) * ky;
+        moving = true;
+      }
+      step(dt);
+      if (moving || guided || dirty || (motion && now - lastDraw > 33)) { draw(); lastDraw = now; dirty = false; }
+      if (moving || (guided && !guided.done) || motion) raf = requestAnimationFrame(frame);
+    }
+    function step(dt) {
+      if (!motion) return;
+      const total = tree.us || 1, span = cam.x1 - cam.x0, rows = H / RH;
+      for (const v of vents) {
+        if (v.cause === "idle") continue;
+        const x = (v.x - cam.x0) / span * W, w = v.w / span * W;
+        if (x > W || x + w < 0 || w < 2 || v.depth + 1 < cam.y - 1 || v.depth > cam.y + rows + 1) continue;
+        const share = v.self / total;
+        if (Math.random() < dt * Math.min(16, 1.5 + share * 70)) {
+          if (bubbles.length > 260) bubbles.shift();
+          const fast = v.cause === "cpu" || v.cause === "cpu-wait";
+          const lo = Math.max(v.x, cam.x0), hi = Math.min(v.x + v.w, cam.x1);
+          bubbles.push({ x: lo + (hi - lo) * (0.1 + Math.random() * 0.8), y: v.depth + 0.85, r: 1.4 + Math.random() * (1.5 + Math.min(4, share * 25)), c: v.cause,
+            vy: fast ? -(1.4 + Math.random() * 1.4) : -(0.12 + Math.random() * 0.22), ph: Math.random() * 6.28, life: 0 });
+        }
+      }
+      for (let i = bubbles.length - 1; i >= 0; i--) { const b = bubbles[i]; b.y += b.vy * dt; b.life += dt; if (b.life > 9 || b.y < -1.2) bubbles.splice(i, 1); }
+      const dy = (cam.y - snowY) * RH / H; snowY = cam.y;
+      for (const s of snow) {
+        s.y += dt * 0.012 * s.z - dy * s.z * 0.6; s.x += Math.sin(t * 0.3 + s.z * 9) * dt * 0.003;
+        s.y -= Math.floor(s.y); s.x -= Math.floor(s.x);
+      }
+    }
+    const rr = (g, x, y, w, h, r) => { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); };
+    function draw() {
+      ready();
+      const g = cv.getContext("2d");
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const span = cam.x1 - cam.x0, rows = H / RH, Dn = Math.max(6, maxD), total = tree.us || 1;
+      const sx = x => (x - cam.x0) / span * W, sy = d => (d - cam.y) * RH;
+      // water, darker with depth
+      const bg = g.createLinearGradient(0, 0, 0, H);
+      bg.addColorStop(0, water(cam.y / Dn)); bg.addColorStop(1, water((cam.y + rows) / Dn));
+      g.fillStyle = bg; g.fillRect(0, 0, W, H);
+      // light from the surface, fading as you go down
+      const sun = Math.max(0, 1 - Math.max(0, cam.y) / 9);
+      if (sun > 0.01) {
+        g.save(); g.globalCompositeOperation = "lighter";
+        const top = Math.max(0, sy(-0.45));
+        for (let i = 0; i < 5; i++) {
+          const bx = W * (0.1 + i * 0.2) + Math.sin(t * 0.25 + i * 1.7) * 30, w0 = 16 + (i % 2) * 14, w1 = w0 * 4.5, len = H * 0.9;
+          const gr = g.createLinearGradient(0, top, 0, top + len);
+          gr.addColorStop(0, `rgba(190, 235, 255, ${0.11 * sun})`); gr.addColorStop(1, "rgba(190, 235, 255, 0)");
+          g.fillStyle = gr;
+          g.beginPath(); g.moveTo(bx - w0 / 2, top); g.lineTo(bx + w0 / 2, top); g.lineTo(bx + w1 / 2 + 70, top + len); g.lineTo(bx - w1 / 2 + 70, top + len); g.closePath(); g.fill();
+        }
+        g.restore();
+      }
+      // marine snow
+      g.fillStyle = "rgb(220, 240, 255)";
+      for (const s of snow) { g.globalAlpha = 0.12 + s.z * 0.22; g.beginPath(); g.arc(s.x * W, s.y * H, s.r * s.z, 0, 6.283); g.fill(); }
+      g.globalAlpha = 1;
+      // the surface
+      const s0 = sy(-0.42);
+      if (s0 > -8) {
+        const wave = x => s0 + Math.sin(x / 38 + t * 1.4) * 2.2 + Math.sin(x / 15 - t * 0.9);
+        g.fillStyle = dark() ? "hsl(205, 38%, 11%)" : "hsl(196, 70%, 93%)";
+        g.beginPath(); g.moveTo(0, -1); for (let x = 0; x <= W + 8; x += 8) g.lineTo(x, wave(x)); g.lineTo(W + 8, -1); g.closePath(); g.fill();
+        g.strokeStyle = "rgba(255, 255, 255, .6)"; g.lineWidth = 1.2;
+        g.beginPath(); for (let x = 0; x <= W + 8; x += 8) x ? g.lineTo(x, wave(x)) : g.moveTo(x, wave(x)); g.stroke();
+      }
+      // the call tree
+      const any = !!(st.q || st.kindHi), marks = [];
+      const d0 = Math.floor(cam.y) - 1, d1 = Math.ceil(cam.y + rows) + 1;
+      g.font = "600 11.5px -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif";
+      g.textBaseline = "middle";
+      (function walk(n) {
+        const x = sx(n.x), w = n.w / span * W;
+        if (x > W || x + w < 0 || w < 0.4 || n.depth > d1) return;
+        if (n.depth >= d0) {
+          const y = sy(n.depth) + 2, h = RH - 5, c = tone(n);
+          const hit = any && matches(n), dim = any && !hit, silt = n.frame?.func === SMALLER;
+          const a = Math.max(x, -6), ww = Math.min(x + w, W + 6) - a - (w > 3 ? 1 : 0);
+          g.fillStyle = hsl(c, c.l, dim ? 0.2 : silt ? 0.4 : 0.93);
+          if (ww < 3) g.fillRect(a, y, Math.max(0.4, ww), h);
+          else {
+            rr(g, a + 0.5, y, ww, h, Math.min(8, ww / 2, h / 2)); g.fill();
+            if (n.kind === "app" && !dim) { g.strokeStyle = `hsla(${c.h}, 95%, 72%, .8)`; g.lineWidth = 1; g.stroke(); }
+            g.fillStyle = `rgba(255, 255, 255, ${dim ? 0.06 : 0.26})`; g.fillRect(a + 4, y + 1.5, Math.max(0, ww - 8), 1.2);
+          }
+          if (ww > 40) {
+            const max = Math.floor((ww - 14) / 6.7);
+            g.fillStyle = dim ? "rgba(255, 255, 255, .4)" : "#fff";
+            g.fillText(n.label.length > max ? n.label.slice(0, Math.max(1, max - 1)) + "…" : n.label, Math.max(a, 0) + 7, y + h / 2 + 0.5);
+          }
+          const fn = n.frame?.fn;
+          const mark = fn && fn === st.sel ? "sel" : fn && fn === st.hover ? "hover" : hit && st.q ? "hit" : null;
+          if (mark && marks.length < 80) marks.push([a + 0.5, y, Math.max(ww, 2), h, mark, c]);
+        }
+        for (const k of n.sorted || []) walk(k);
+      })(tree);
+      // where the time is spent glows
+      g.save(); g.globalCompositeOperation = "lighter";
+      for (const v of vents) {
+        const x = sx(v.x), w = v.w / span * W;
+        if (x > W || x + w < 0 || w < 2) continue;
+        const y = sy(v.depth + 1) - 3;
+        if (y < -60 || y > H + 60) continue;
+        const share = v.self / total, cx = (Math.max(x, 0) + Math.min(x + w, W)) / 2;
+        const R = Math.min(70, Math.max(10, Math.min(w, 220) * 0.3 + share * 150)) * (motion ? 1 + 0.1 * Math.sin(t * 2.6 + v.ph) : 1);
+        const gr = g.createRadialGradient(cx, y, 0, cx, y, R);
+        gr.addColorStop(0, `hsla(${HUE[v.cause]}, 95%, 64%, ${0.5 * Math.min(1, 0.35 + share * 4)})`); gr.addColorStop(1, `hsla(${HUE[v.cause]}, 95%, 60%, 0)`);
+        g.fillStyle = gr; g.fillRect(cx - R, y - R, 2 * R, 2 * R);
+      }
+      g.restore();
+      // bubbles rising through the callers
+      for (const b of bubbles) {
+        const x = sx(b.x) + Math.sin(b.ph + t * 2.1) * 2.4, y = sy(b.y);
+        if (x < -10 || x > W + 10 || y < -10 || y > H + 10) continue;
+        g.globalAlpha = 0.75 * Math.min(1, b.life * 3) * Math.max(0, 1 - b.life / 9);
+        g.strokeStyle = b.c === "cpu" ? "rgb(235, 248, 255)" : `hsl(${HUE[b.c]}, 85%, 76%)`; g.lineWidth = 1;
+        g.beginPath(); g.arc(x, y, b.r, 0, 6.283); g.stroke();
+        g.fillStyle = "#fff"; g.beginPath(); g.arc(x - b.r * 0.35, y - b.r * 0.35, Math.max(0.5, b.r * 0.25), 0, 6.283); g.fill();
+      }
+      g.globalAlpha = 1;
+      // the guided dive's trail
+      if (guided) {
+        const p = guided.path.slice(0, guided.i + 1).map(n => [(Math.max(sx(n.x), 0) + Math.min(sx(n.x + n.w), W)) / 2, sy(n.depth) + RH / 2]);
+        const col = `hsl(${HUE[domCause(guided.path[guided.path.length - 1])] ?? 22}, 100%, 72%)`;
+        g.save(); g.lineWidth = 3; g.lineCap = "round"; g.lineJoin = "round"; g.setLineDash([2, 9]); g.lineDashOffset = -t * 30;
+        g.strokeStyle = col; g.shadowColor = col; g.shadowBlur = 12;
+        g.beginPath(); p.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke();
+        const [hx, hy] = p[p.length - 1];
+        g.setLineDash([]); g.fillStyle = "#fff"; g.beginPath(); g.arc(hx, hy, 5 + (motion ? Math.sin(t * 5) : 0), 0, 6.283); g.fill();
+        g.restore();
+      }
+      for (const [x, y, w, h, kind, c] of marks) {
+        g.save();
+        g.strokeStyle = kind === "hit" ? `hsl(${c.h}, 100%, 78%)` : "#fff"; g.lineWidth = kind === "sel" ? 2 : 1.5;
+        if (kind === "sel") { g.shadowColor = `hsl(${c.h}, 100%, 70%)`; g.shadowBlur = 14; }
+        rr(g, x, y, w, h, Math.min(8, w / 2, h / 2)); g.stroke(); g.restore();
+      }
+      // depth marks
+      g.fillStyle = "rgba(255, 255, 255, .42)"; g.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace"; g.textAlign = "right";
+      for (let d = Math.max(5, Math.ceil(d0 / 5) * 5); d <= d1; d += 5) { const y = sy(d); g.fillRect(W - 8, y, 6, 1); g.fillText(String(d), W - 12, y + 1); }
+      g.textAlign = "left";
+      const mid = cam.y + rows / 2, f = mid / Dn;
+      const zone = cam.y < 0.5 ? "At the surface" : f < 0.2 ? "Sunlit zone" : f < 0.45 ? "Twilight zone" : f < 0.75 ? "Midnight zone" : "The abyss";
+      const zt = `${zone} · depth ${Math.max(0, Math.round(mid))} of ${maxD}`;
+      if (zoneEl.textContent !== zt) zoneEl.textContent = zt;
+      // sonar
+      const m = mm.getContext("2d");
+      m.setTransform(1, 0, 0, 1, 0, 0); m.clearRect(0, 0, mm.width, mm.height); m.drawImage(mapC, 0, 0);
+      m.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const rh = mapH / (maxD + 1.5), vx = cam.x0 * mapW, vw = Math.max(3, span * mapW), vy = (cam.y + 0.5) * rh, vh = Math.max(3, rows * rh);
+      m.fillStyle = "rgba(255, 255, 255, .1)"; m.fillRect(vx, vy, vw, vh);
+      m.strokeStyle = "#fff"; m.lineWidth = 1.2; m.strokeRect(vx, vy, vw, vh);
+      if (motion) { const p = (t % 3) / 3; m.strokeStyle = `rgba(120, 230, 255, ${0.5 * (1 - p)})`; m.beginPath(); m.arc(vx + vw / 2, vy + vh / 2, 4 + p * 60, 0, 6.283); m.stroke(); }
+    }
+
+    // ---- swimming: drag (with momentum), pinch, scroll, keys, the sonar
+    const pts = new Map(); let drag = null, pinch = null;
+    const local = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    cv.addEventListener("pointerdown", e => {
+      engaged = true; autoRan = true; stopGuide(); fling = null; hideTip();
+      cv.setPointerCapture(e.pointerId);
+      const [x, y] = local(e);
+      pts.set(e.pointerId, [x, y]);
+      if (pts.size === 2) {
+        const [[ax, ay], [bx, by]] = [...pts.values()];
+        pinch = { d: Math.hypot(ax - bx, ay - by) || 1, mx: (ax + bx) / 2, my: (ay + by) / 2, x0: tgt.x0, x1: tgt.x1, y: tgt.y }; drag = null;
+      } else drag = { sx: x, sy: y, lx: x, ly: y, lt: performance.now(), x0: tgt.x0, x1: tgt.x1, y: tgt.y, moved: 0, vx: 0, vy: 0 };
+      cv.classList.add("grab");
+    });
+    cv.addEventListener("pointermove", e => {
+      const [x, y] = local(e);
+      if (pts.has(e.pointerId)) pts.set(e.pointerId, [x, y]);
+      if (pinch && pts.size === 2) {
+        const [[ax, ay], [bx, by]] = [...pts.values()];
+        const d = Math.hypot(ax - bx, ay - by) || 1, mx = (ax + bx) / 2, my = (ay + by) / 2;
+        const span0 = pinch.x1 - pinch.x0, at = pinch.x0 + pinch.mx / W * span0, ns = span0 * pinch.d / d;
+        tgt.x0 = at - mx / W * ns; tgt.x1 = tgt.x0 + ns; tgt.y = pinch.y - (my - pinch.my) / RH;
+        clampT(); Object.assign(cam, tgt); kick(); return;
+      }
+      if (drag) {
+        const now = performance.now(), span = drag.x1 - drag.x0, dt = Math.max(1, now - drag.lt) / 1000;
+        drag.moved = Math.max(drag.moved, Math.abs(x - drag.sx) + Math.abs(y - drag.sy));
+        tgt.x0 = drag.x0 - (x - drag.sx) / W * span; tgt.x1 = tgt.x0 + span; tgt.y = drag.y - (y - drag.sy) / RH;
+        clampT(); Object.assign(cam, tgt);
+        drag.vx = 0.7 * drag.vx + 0.3 * (-(x - drag.lx) / W * span / dt); drag.vy = 0.7 * drag.vy + 0.3 * (-(y - drag.ly) / RH / dt);
+        drag.lx = x; drag.ly = y; drag.lt = now;
+        kick(); return;
+      }
+      const n = hitTest(x, y), fn = n?.frame?.fn || null;
+      if (n) showTip(e, n, n === focusNode && n.parent ? "click to come up a level" : "click to dive in"); else hideTip();
+      cv.style.cursor = n ? "pointer" : "";
+      if (fn !== st.hover) { st.hover = fn; kick(); }
+    });
+    const end = e => {
+      pts.delete(e.pointerId);
+      if (pinch) { if (pts.size < 2) pinch = null; return; }
+      if (!drag) return;
+      const d = drag; drag = null; cv.classList.remove("grab");
+      if (d.moved < 5) {
+        const [x, y] = local(e), n = hitTest(x, y);
+        if (n) { if (n === focusNode && n.parent) up(); else flyTo(n); }
+      } else if (motion && performance.now() - d.lt < 90 && (Math.abs(d.vy) > 0.6 || Math.abs(d.vx) > (d.x1 - d.x0) * 0.08)) fling = { vx: d.vx, vy: d.vy };
+      kick();
+    };
+    cv.addEventListener("pointerup", end);
+    cv.addEventListener("pointercancel", end);
+    cv.addEventListener("pointerleave", () => { if (drag) return; engaged = false; hideTip(); if (st.hover) { st.hover = null; kick(); } });
+    cv.addEventListener("wheel", e => {
+      const [x] = local(e), k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1;
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); autoRan = true; stopGuide(); fling = null; zoomBy(Math.exp(e.deltaY * k * 0.0022), x); return; }
+      // Until you click into the water, the wheel scrolls the page.
+      if (!engaged) { hint("Click the water, then scroll to dive"); return; }
+      const bx = tgt.x0, by = tgt.y, span = tgt.x1 - tgt.x0, hz = e.shiftKey ? e.deltaY : e.deltaX;
+      if (Math.abs(hz) > Math.abs(e.shiftKey ? 0 : e.deltaY)) { tgt.x0 += hz * k / W * span; tgt.x1 = tgt.x0 + span; }
+      else tgt.y += e.deltaY * k / RH * 0.5;
+      clampT();
+      // At the top or the bottom, the page scrolls on.
+      if (tgt.x0 !== bx || tgt.y !== by) { e.preventDefault(); stopGuide(); fling = null; kick(); }
+    }, { passive: false });
+    cv.addEventListener("keydown", e => {
+      const span = tgt.x1 - tgt.x0;
+      if (e.key === "f") { e.preventDefault(); autoRan = true; follow(); return; }
+      if (e.key === "ArrowDown") tgt.y += 1;
+      else if (e.key === "ArrowUp") tgt.y -= 1;
+      else if (e.key === "ArrowLeft") { tgt.x0 -= span * 0.12; tgt.x1 -= span * 0.12; }
+      else if (e.key === "ArrowRight") { tgt.x0 += span * 0.12; tgt.x1 += span * 0.12; }
+      else if (e.key === "+" || e.key === "=") zoomBy(1 / 1.5);
+      else if (e.key === "-" || e.key === "_") zoomBy(1.5);
+      else return;
+      e.preventDefault(); e.stopPropagation(); autoRan = true; stopGuide(); clampT(); kick();
+    });
+    const mapGo = e => {
+      const r = mm.getBoundingClientRect(), px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height, span = tgt.x1 - tgt.x0;
+      autoRan = true; stopGuide(); fling = null;
+      tgt.x0 = px - span / 2; tgt.x1 = tgt.x0 + span; tgt.y = py * (maxD + 1.5) - 0.5 - H / RH / 2;
+      clampT(); kick();
+    };
+    mm.addEventListener("pointerdown", e => { e.stopPropagation(); mm.setPointerCapture(e.pointerId); mm._down = true; mapGo(e); });
+    mm.addEventListener("pointermove", e => { if (mm._down) mapGo(e); });
+    mm.addEventListener("pointerup", () => { mm._down = false; });
+    if ("IntersectionObserver" in window) new IntersectionObserver(es => {
+      for (const e of es) {
+        visible = e.isIntersecting;
+        if (!visible) continue;
+        kick();
+        // The first time it comes into view, dive once to the hottest spot.
+        if (!autoRan && motion) { autoRan = true; setTimeout(() => { if (visible && !guided && !drag && cv.isConnected) follow(); }, 700); }
+      }
+    }, { threshold: 0.35 }).observe(wrap);
+    if ("ResizeObserver" in window) new ResizeObserver(() => { if (cv.isConnected && Math.abs((wrap.clientWidth || W) - W) > 1) resize(); }).observe(wrap);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) kick(); });
+
+    return {
+      box,
+      enter() { resize(); ready(); fit(index.get(st.focus) || tree, true); kick(); },
+      kick,
+      up,
+      flyToFn(fn) {
+        ready();
+        let best = null;
+        for (const n of index.values()) if (n.frame?.fn === fn && (!best || n.us > best.us)) best = n;
+        if (best) { autoRan = true; stopGuide(); flyTo(best); }
+        return !!best;
+      },
+      resize() { if (cv.isConnected) resize(); },
+      retheme() { if (laidFor && laidFor === tree) drawMap(); kick(); },
+    };
+  })();
 
   // ---- top functions
   function topRows() {
@@ -883,7 +1416,7 @@ function explorer(M, opts = {}) {
     const lines = [...r.lines.entries()].sort((a, b) => b[1] - a[1]);
     put(side, 
       el("div", { style: "display:flex;gap:6px;align-items:center;margin-bottom:6px" }, kindBadge(f), el("div", { class: "spacer" }),
-        el("button", { class: "copy", onclick: () => { st.sel = null; renderSide(); paint(); if (st.view !== "flame") renderMain(); } }, "close ×")),
+        el("button", { class: "copy", onclick: () => { st.sel = null; renderSide(); paint(); if (st.view !== "flame" && st.view !== "dive") renderMain(); } }, "close ×")),
       el("h3", {}, f.name),
       f.func !== f.name ? el("div", { class: "full" }, f.func) : null,
       f.file ? el("div", {}, el("button", { class: "copy", title: "Copy the location", onclick: () => copyText(fullWhere(f), fullWhere(f)) }, where(f), " ⧉")) : el("div", { class: "faint" }, f.module || ""),
@@ -897,7 +1430,7 @@ function explorer(M, opts = {}) {
       r.callers.size ? [el("h4", {}, "Called by"), list(r.callers)] : null,
       r.callees.size ? [el("h4", {}, "Calls"), list(r.callees)] : null,
       el("div", { class: "acts" },
-        el("button", { class: "btn", onclick: () => { st.view = "flame"; renderToolbar(); renderMain(); zoomToFn(f.fn); } }, icon("zoom"), "Find in graph"),
+        el("button", { class: "btn", onclick: () => { if (st.view === "dive") dive.flyToFn(f.fn); else { st.view = "flame"; renderToolbar(); renderMain(); zoomToFn(f.fn); } } }, icon("zoom"), st.view === "dive" ? "Swim to it" : "Find in graph"),
         el("button", { class: "btn", onclick: () => askAgent(fnPrompt(f, r, total)) }, icon("spark"), host.on ? "Ask the agent" : "Prompt")));
   }
   function domCauseOf(r) { let b = "cpu", v = -1; for (const [c, x] of Object.entries(r.by)) if (x > v) { v = x; b = c; } return b; }
@@ -909,13 +1442,15 @@ function explorer(M, opts = {}) {
   function legend() {
     const L = flameL();
     const items = [["app", causeColor([...st.causes][0] || "cpu", L - 4)], ["lib", `hsl(215 46% ${L}%)`], ["std", `hsl(222 16% ${L + 2}%)`], ["sys", `hsl(222 10% ${L - 6}%)`], ["kernel", `hsl(252 14% ${L - 10}%)`]];
-    return el("div", { class: "legend" }, items.map(([k, c]) => el("button", { "aria-pressed": String(st.kindHi === k), title: "Highlight " + KIND[k], onclick: () => { st.kindHi = st.kindHi === k ? null : k; if (st.view !== "flame") { st.view = "flame"; renderMain(); } renderToolbar(); renderSide(); paint(); } },
+    return el("div", { class: "legend" }, items.map(([k, c]) => el("button", { "aria-pressed": String(st.kindHi === k), title: "Highlight " + KIND[k], onclick: () => { st.kindHi = st.kindHi === k ? null : k; if (st.view !== "flame" && st.view !== "dive") { st.view = "flame"; renderMain(); } renderToolbar(); renderSide(); paint(); } },
       el("i", { style: `background:${c}` }), KIND[k])));
   }
   function select(fn, zoomIt) {
     st.sel = fn;
     renderSide();
-    if (st.view === "flame") { paint(); if (zoomIt) zoomToFn(fn); } else renderMain();
+    if (st.view === "flame") { paint(); if (zoomIt) zoomToFn(fn); }
+    else if (st.view === "dive") { if (zoomIt) dive.flyToFn(fn); else dive.kick(); }
+    else renderMain();
   }
   function zoomToFn(fn) {
     let best = null;
@@ -926,7 +1461,10 @@ function explorer(M, opts = {}) {
   // ---- main
   function renderMain() {
     hideTip();
-    if (st.view === "flame") {
+    if (st.view === "dive") {
+      put(mainCol, dive.box, el("div", { style: "display:flex;gap:10px;align-items:center;margin-top:4px;flex-wrap:wrap" }, info));
+      requestAnimationFrame(() => dive.enter());
+    } else if (st.view === "flame") {
       put(mainCol, crumbs, scroller, el("div", { style: "display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap" }, info, el("div", { class: "spacer" }),
         el("span", { class: "hintline", style: "margin:0" }, st.mine ? "Showing only your functions; library and runtime frames between them are folded (“…”)." : "Every frame, from the thread's start (top) to where the time is spent (bottom).")));
       requestAnimationFrame(drawFlame);
@@ -943,8 +1481,9 @@ function explorer(M, opts = {}) {
       const f = F.find(x => x.fn === fn) || F.find(x => x.func === func);
       if (!f) return false;
       if (st.mine && f.kind !== "app") st.mine = false;
-      st.view = "flame"; build(); renderToolbar(); renderMain();
-      requestAnimationFrame(() => { zoomToFn(f.fn); paint(); });
+      if (st.view !== "dive") st.view = "flame";
+      build(); renderToolbar(); renderMain();
+      requestAnimationFrame(() => requestAnimationFrame(() => { if (st.view === "dive") dive.flyToFn(f.fn); else { zoomToFn(f.fn); paint(); } }));
       root.scrollIntoView({ behavior: motion ? "smooth" : "auto", block: "start" });
       return true;
     },
@@ -953,11 +1492,12 @@ function explorer(M, opts = {}) {
       if (ev.key === "/" && document.activeElement?.tagName !== "INPUT") { ev.preventDefault(); toolbar._input?.focus(); }
       else if (ev.key === "Escape") {
         if (document.activeElement?.tagName === "INPUT" && st.q) { st.q = ""; renderToolbar(); paint(); if (st.view !== "flame") renderMain(); }
-        else if (st.focus) { const n = index.get(st.focus); zoom(n?.parent || tree); }
+        else if (st.view === "dive" && st.focus) dive.up();
+        else if (st.focus && st.view === "flame") { const n = index.get(st.focus); zoom(n?.parent || tree); }
         else if (st.sel) { st.sel = null; renderSide(); paint(); }
       } else if (ev.key === "m" && document.activeElement?.tagName !== "INPUT" && M.hasApp) { st.mine = !st.mine; update(); }
     },
-    redraw() { if (st.view === "flame") drawFlame(); renderSide(); },
+    redraw() { if (st.view === "flame") drawFlame(); else if (st.view === "dive") dive.retheme(); renderSide(); },
   };
   update();
   activeEx = api;
@@ -1009,7 +1549,7 @@ function answerPage(a, opts = {}) {
   const bd = a.breakdown || {};
   const parts = CAUSES.filter(c => c !== "idle" && (bd[c] || 0) > 0.003).map(c => [c, bd[c]]);
   const main = a.cause;
-  const ex = M ? explorer(M, { cause: null, subject: `${a.name} (pid ${a.pid})` }) : null;
+  const ex = M ? explorer(M, { cause: null, subject: `${a.name} (pid ${a.pid})`, code: a.code }) : null;
   const sp = splitSummary(a);
   const big = el("div", { class: "big" });
   if (main) countUp(big, Math.round((a.share || 0) * 100), v => Math.round(v) + "%"); else big.textContent = "idle";
@@ -1128,7 +1668,7 @@ function runView(r) {
   const bd = r.breakdown || {};
   const parts = CAUSES.filter(c => c !== "idle" && (bd[c] || 0) > 0.003).map(c => [c, bd[c]]);
   const top = parts.slice().sort((a, b) => b[1] - a[1])[0]?.[0];
-  const ex = M ? explorer(M, { subject: `\`${cmd}\`` }) : null;
+  const ex = M ? explorer(M, { subject: `\`${cmd}\``, code: r.code }) : null;
   const big = el("div", { class: "big" });
   countUp(big, (r.wall_ms || 0) / 1000, v => secs(v));
   const procs = (r.processes || []).slice().sort((a, b) => sum(b.seconds) - sum(a.seconds));
