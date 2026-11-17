@@ -6,7 +6,6 @@ rust-version = "1.88"
 description = "Explain why a process is slow, and where in its code: Linux (procfs, eBPF) and macOS, any language, one binary."
 license = "MIT"
 repository = "https://github.com/aryehlev/wits"
-homepage = "https://github.com/aryehlev/wits"
 readme = "README.md"
 keywords = ["performance", "profiler", "ebpf", "debugging", "cli"]
 categories = ["command-line-utilities", "development-tools::profiling"]

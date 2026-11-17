@@ -400,7 +400,7 @@ impl Others {
             .filter_map(|(p, b)| self.before.get(p).map(|a| (*p, f(b).saturating_sub(f(a)))))
             .filter(|x| x.1 > 0)
             .collect();
-        v.sort_by(|a, b| b.1.cmp(&a.1));
+        v.sort_by_key(|a| std::cmp::Reverse(a.1));
         v
     }
 }

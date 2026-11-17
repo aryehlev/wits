@@ -144,7 +144,7 @@ pub fn watch_tree(root: i32, want_stacks: bool, done: &mut dyn FnMut() -> bool) 
     let start = Instant::now();
     let mut tick: u32 = 0;
     let mut gone: HashSet<i32> = HashSet::new();
-    let mut last_live: Vec<i32> = Vec::new();
+    let last_live: Vec<i32>;
     loop {
         let finished = done();
         // Descendants, plus anything seen before and still alive (orphans
