@@ -9,6 +9,12 @@ No root needed; with root it sees more.
 
 [简体中文](README.zh-CN.md)
 
+![wits demo](demo/demo.gif)
+
+`top` shows you a number. `wits` gives you the sentence you would have written
+after ten minutes with `top`, `iotop`, `strace`, `lsof`, `/proc/locks` and a
+profiler.
+
 ## For coding agents
 
 If you are a coding agent and something is slow, hanging or stuck, measure
@@ -56,12 +62,6 @@ python3 (pid 6723, pod shop/api-7d9f/api) is waiting for another process: 100% o
   what   blocked in recvfrom() on fd 3, TCP 10.20.0.1:45476 → 10.20.0.2:5432 (postgres)
   blame  pid 6719 (python3 …/server.py, pod db/pg-0/postgres), which is itself waiting for disk
 ```
-
-![wits demo](demo/demo.gif)
-
-`top` shows you a number. `wits` gives you the sentence you would have written
-after ten minutes with `top`, `iotop`, `strace`, `lsof`, `/proc/locks` and a
-profiler.
 
 ## Install
 

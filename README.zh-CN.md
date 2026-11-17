@@ -8,6 +8,11 @@
 
 [English](README.md)
 
+![wits 演示](demo/demo.gif)
+
+`top` 只给你一个数字。`wits` 直接给出结论，也就是你用 `top`、`iotop`、`strace`、`lsof`、
+`/proc/locks` 和性能分析器查上十分钟才能写出来的那句话。输出为英文。
+
 ## 写给编程智能体
 
 如果你是一个编程智能体，遇到了慢、卡住或没有进展的情况，先测量再猜测：
@@ -52,11 +57,6 @@ python3 (pid 6723, pod shop/api-7d9f/api) is waiting for another process: 100% o
   what   blocked in recvfrom() on fd 3, TCP 10.20.0.1:45476 → 10.20.0.2:5432 (postgres)
   blame  pid 6719 (python3 …/server.py, pod db/pg-0/postgres), which is itself waiting for disk
 ```
-
-![wits 演示](demo/demo.gif)
-
-`top` 只给你一个数字。`wits` 直接给出结论，也就是你用 `top`、`iotop`、`strace`、`lsof`、
-`/proc/locks` 和性能分析器查上十分钟才能写出来的那句话。输出为英文。
 
 ## 安装
 
