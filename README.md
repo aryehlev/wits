@@ -415,9 +415,12 @@ Each tool runs `wits` with `--json` and returns that answer, as text and as
 structured content, so it does exactly what the command does. Each can also
 write the [page](#see-it) to a file (`html_file`); hosts that support MCP
 Apps show the page with the result. The server tells the agent how to use
-them: measure first, follow the blame, and report a `diff` verdict as it is.
-To give it root (eBPF stacks, other users' processes), register
-`sudo wits mcp` instead, if you trust the agent with that.
+them: measure first, follow the blame, rank fixes by
+[gain and ease](#choosing-what-to-change), and report a `diff` verdict as it
+is. In the [MCP Registry](https://registry.modelcontextprotocol.io) it is
+`mcp-name: io.github.aryehlev/wits`. To give it root (eBPF stacks, other
+users' processes), register `sudo wits mcp` instead, if you trust the agent
+with that.
 
 For agents that read skills (Claude Code and others),
 `skills/why-is-this-slow/SKILL.md` teaches when to run wits, how to read

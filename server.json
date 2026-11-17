@@ -1,0 +1,27 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.aryehlev/wits",
+  "title": "wits",
+  "description": "Why is a process slow? The cause, who is to blame and the line of code. Linux, macOS, Kubernetes.",
+  "repository": {
+    "url": "https://github.com/aryehlev/wits",
+    "source": "github"
+  },
+  "version": "2.2.2",
+  "packages": [
+    {
+      "registryType": "cargo",
+      "identifier": "wits",
+      "version": "2.2.2",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}

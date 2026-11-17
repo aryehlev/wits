@@ -369,7 +369,9 @@ claude mcp add wits -- wits mcp
 每个工具都用 `--json` 运行 `wits`，把结果同时作为文本和结构化内容返回，所以它和对应的命令
 完全一样。每个工具都可以把[页面](#看得见的结果)写到文件（`html_file`）；支持 MCP Apps 的
 宿主会把页面和结果一起显示。服务器会告诉智能体怎么用这些工具：先测量，顺着归因追下去，
-如实报告 `diff` 的结论。如果要给它 root 权限（eBPF 调用栈、其他用户的进程），改为注册
+按[收益和容易程度](#选择改什么)给修复排序，如实报告 `diff` 的结论。它在
+[MCP Registry](https://registry.modelcontextprotocol.io) 中的名字是
+`mcp-name: io.github.aryehlev/wits`。如果要给它 root 权限（eBPF 调用栈、其他用户的进程），改为注册
 `sudo wits mcp`，前提是你信任这个智能体。
 
 对于支持 skill 的智能体（Claude Code 等），`skills/why-is-this-slow/SKILL.md` 教它什么时候
