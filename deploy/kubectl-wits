@@ -23,7 +23,7 @@ IMAGE=${WITS_IMAGE:-ghcr.io/aryehlev/wits:latest}
 usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 die() { echo "kubectl-wits: $*" >&2; exit 1; }
 
-ns= sel= target= node=
+ns='' sel='' target='' node=''
 while [ $# -gt 0 ]; do
   case $1 in
     -h|--help) usage ;;
@@ -87,7 +87,7 @@ else
 fi
 
 # Targets for wits, and the nodes they are on (the first is asked).
-targets= nodes=
+targets='' nodes=''
 if [ -n "$pods" ]; then
   first=
   while read -r p n; do
