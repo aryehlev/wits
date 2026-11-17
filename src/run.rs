@@ -222,6 +222,8 @@ pub struct Report {
     pub cpu_ns: f64,
     pub procs: Vec<ProcRow>,
     pub code: Option<CodeView>,
+    /// Every stack, for a flame graph (`code::flame_json`).
+    pub flame: Option<String>,
     pub notes: Vec<String>,
 }
 
@@ -311,6 +313,7 @@ fn build(cmd: &[String], runs: Vec<RunResult>) -> Report {
         cv.notes.clear();
         cv
     });
+    let flame = (!merged.is_empty()).then(|| code::flame_json(&merged, 2000));
     Report {
         command: cmd.to_vec(),
         walls: runs.iter().map(|r| r.wall_ns).collect(),
@@ -319,6 +322,7 @@ fn build(cmd: &[String], runs: Vec<RunResult>) -> Report {
         cpu_ns,
         procs,
         code,
+        flame,
         notes,
     }
 }
@@ -442,6 +446,9 @@ pub fn json(r: &Report) -> String {
             .map(crate::out::code_json)
             .unwrap_or_else(|| "null".into())
     ));
+    if let Some(fl) = &r.flame {
+        f.push(format!("\"flame\":{fl}"));
+    }
     let notes: Vec<String> = r.notes.iter().map(|n| esc(n)).collect();
     f.push(format!("\"notes\":[{}]", notes.join(",")));
     format!("{{{}}}", f.join(","))
@@ -474,6 +481,9 @@ pub fn run(a: &Args) -> i32 {
     let exit = runs.last().map(|r| r.exit).unwrap_or(1);
     let rep = build(&a.rest, runs);
     let j = json(&rep);
+    if let Some(p) = &a.html {
+        crate::ui::write(p, &j);
+    }
     if let Some(path) = &a.out {
         if let Err(e) = std::fs::write(path, format!("{j}\n")) {
             die(&format!("cannot write {path}: {e}"), 1);
@@ -648,7 +658,7 @@ pub fn diff(a: &Args) -> i32 {
     fn_rows.sort_by(|a, b| (b.2 - b.1).abs().total_cmp(&(a.2 - a.1).abs()));
     let (ca, cb) = (va.get("cpu_ms").num().unwrap_or(0.0), vb.get("cpu_ms").num().unwrap_or(0.0));
 
-    if a.json {
+    if a.json || a.html.is_some() {
         let causes: Vec<String> = cause_rows
             .iter()
             .map(|(c, x, y)| format!("{{\"cause\":{},\"before\":{},\"after\":{}}}", esc(c), num(*x), num(*y)))
@@ -668,7 +678,7 @@ pub fn diff(a: &Args) -> i32 {
             })
             .collect();
         let notes: Vec<String> = notes.iter().map(|n| esc(n)).collect();
-        println!(
+        let j = format!(
             "{{\"version\":2,\"kind\":\"diff\",\"verdict\":{},\"wall_ms\":{{\"before\":{wa:.0},\"after\":{wb:.0},\"change\":{}}},\"noise\":{},\"cpu_ms\":{{\"before\":{ca:.0},\"after\":{cb:.0}}},\"causes\":[{}],\"functions\":[{}],\"notes\":[{}]}}",
             esc(verdict),
             num(rel),
@@ -677,7 +687,13 @@ pub fn diff(a: &Args) -> i32 {
             fns.join(","),
             notes.join(",")
         );
-        return 0;
+        if let Some(p) = &a.html {
+            crate::ui::write(p, &j);
+        }
+        if a.json {
+            println!("{j}");
+            return 0;
+        }
     }
     let mut out = vec![style.bold(&format!(
         "{verdict}: {} → {} ({}), {noise}",

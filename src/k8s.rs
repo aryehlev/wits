@@ -155,36 +155,115 @@ fn from_environ(pid: i32) -> Option<(String, String)> {
     Some((ns, name))
 }
 
-/// The processes of a pod ("namespace/name" or "namespace/name/container",
-/// or just "name" in any namespace), busiest first, without pause containers.
-pub fn pod_pids(spec: &str) -> Result<Vec<(i32, Pod)>, String> {
+/// A container's processes: (pid, CPU ticks so far, threads).
+type Procs = Vec<(i32, u64, i64)>;
+
+/// What a pod target matched on this node.
+pub struct PodMatch {
+    /// A pod with exactly the name asked for (pod names are unique in a
+    /// namespace), rather than the pods of a workload of that name.
+    pub exact: bool,
+    /// Each pod (its label without the container), with the processes
+    /// worth explaining.
+    pub pods: Vec<(String, Vec<i32>)>,
+    /// Pods left out to keep the work bounded.
+    pub more: usize,
+}
+
+/// The pods "namespace/name[/container]" names on this node: the pod
+/// called `name`, or else the pods of the Deployment, StatefulSet,
+/// DaemonSet or Job called `name`. Per pod, up to `per_pod` processes,
+/// taking each container's busiest before any container's second, so a
+/// busy sidecar does not crowd out the application. Pause containers are
+/// left out.
+pub fn match_pods(spec: &str, per_pod: usize, max_pods: usize) -> Result<PodMatch, String> {
     let parts: Vec<&str> = spec.split('/').collect();
     let (ns, name, container) = match parts.as_slice() {
-        [n] => (None, *n, None),
-        [ns, n] => (Some(*ns), *n, None),
-        [ns, n, c] => (Some(*ns), *n, Some(*c)),
+        [ns, n] if !ns.is_empty() && !n.is_empty() => (*ns, *n, None),
+        [ns, n, c] if !ns.is_empty() && !n.is_empty() => (*ns, *n, Some(*c)),
         _ => return Err(format!("'{spec}': give a pod as namespace/name[/container]")),
     };
     let mut ix = Index::load();
-    let mut out = Vec::new();
+    // (pod name, container) -> its processes
+    let mut found: HashMap<(String, String), Procs> = HashMap::new();
     for pid in proc::pids() {
         let Some(st) = proc::stat(pid) else { continue };
         if st.state == 'Z' || st.is_kthread() || st.comm == "pause" {
             continue;
         }
         let Some(p) = ix.pod_of(pid) else { continue };
-        if p.name == name
-            && ns.map(|n| n == p.namespace).unwrap_or(true)
-            && container.map(|c| c == p.container).unwrap_or(true)
-        {
-            out.push((pid, p, st.utime + st.stime, st.num_threads));
+        if p.namespace != ns || container.is_some_and(|c| c != p.container) {
+            continue;
+        }
+        if p.name == name || is_replica(&p.name, name) {
+            found
+                .entry((p.name, p.container))
+                .or_default()
+                .push((pid, st.utime + st.stime, st.num_threads as i64));
         }
     }
-    if out.is_empty() {
+    let exact = found.keys().any(|(p, _)| p == name);
+    if exact {
+        found.retain(|(p, _), _| p == name);
+    }
+    let mut pods: HashMap<String, Vec<(String, Procs)>> = HashMap::new();
+    for ((pod, c), mut procs) in found {
+        procs.sort_by_key(|x| std::cmp::Reverse((x.1, x.2)));
+        pods.entry(pod).or_default().push((c, procs));
+    }
+    if pods.is_empty() {
         return Err(format!("no process of pod '{spec}' runs on this node"));
     }
-    out.sort_by_key(|x| std::cmp::Reverse((x.2, x.3)));
-    Ok(out.into_iter().map(|x| (x.0, x.1)).collect())
+    let mut out: Vec<(String, Vec<i32>)> = pods
+        .into_iter()
+        .map(|(pod, mut cs)| {
+            cs.sort_by(|a, b| b.1[0].1.cmp(&a.1[0].1).then(a.0.cmp(&b.0)));
+            let mut pick = Vec::new();
+            for round in 0.. {
+                let before = pick.len();
+                for (_, procs) in &cs {
+                    if let Some(p) = procs.get(round) {
+                        if pick.len() < per_pod {
+                            pick.push(p.0);
+                        }
+                    }
+                }
+                if pick.len() == before || pick.len() >= per_pod {
+                    break;
+                }
+            }
+            (format!("{ns}/{pod}"), pick)
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    let more = out.len().saturating_sub(max_pods);
+    out.truncate(max_pods);
+    Ok(PodMatch { exact, pods: out, more })
+}
+
+/// Whether `pod` is a name Kubernetes gives a pod of workload `w`:
+/// w-<template hash>-<5> for a Deployment, w-<5> for a DaemonSet, Job or
+/// ReplicaSet, w-<ordinal> for a StatefulSet, w-<time>-<5> for a CronJob.
+/// Generated parts use Kubernetes' vowel-free alphabet, which keeps
+/// `api` from matching a Deployment called `api-gateway`.
+pub fn is_replica(pod: &str, w: &str) -> bool {
+    let Some(rest) = pod.strip_prefix(w).and_then(|r| r.strip_prefix('-')) else {
+        return false;
+    };
+    let safe = |s: &str| s.bytes().all(|c| b"bcdfghjklmnpqrstvwxz2456789".contains(&c));
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
+    let suffix = |s: &str| s.len() == 5 && safe(s);
+    match rest.split('-').collect::<Vec<_>>().as_slice() {
+        [r] => suffix(r) || digits(r),
+        [h, r] => suffix(r) && (6..=10).contains(&h.len()) && (safe(h) || digits(h)),
+        _ => false,
+    }
+}
+
+/// The processes of one pod, for a caller that wants a single process.
+pub fn pod_pids(spec: &str) -> Result<Vec<i32>, String> {
+    let m = match_pods(spec, 8, 1)?;
+    Ok(m.pods.into_iter().flat_map(|p| p.1).collect())
 }
 
 /// "namespace/pod/container" for a process in a pod; None elsewhere, after
@@ -351,6 +430,18 @@ mod tests {
         assert_eq!(u, "4f1b2c3d-1111-2222-3333-444455556666");
         assert_eq!(c, "0123456789abcdef0123");
         assert!(parse_cgroup("/user.slice/user-1000.slice/session-2.scope").is_none());
+    }
+
+    #[test]
+    fn replicas_by_name() {
+        assert!(is_replica("web-7d9f8b6c5-x2k4q", "web")); // Deployment
+        assert!(is_replica("web-x2k4q", "web")); // DaemonSet, Job
+        assert!(is_replica("pg-0", "pg")); // StatefulSet
+        assert!(is_replica("report-28374650-b5n8w", "report")); // CronJob
+        assert!(!is_replica("web-gateway-6c8d9f7b5-q9w2x", "web"));
+        assert!(!is_replica("web-v2-x2k4q", "web"));
+        assert!(!is_replica("webapp-x2k4q", "web"));
+        assert!(!is_replica("web", "web"));
     }
 
     #[test]

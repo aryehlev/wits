@@ -8,7 +8,7 @@ cd "$(dirname "$0")" || exit 1
 [ -x "$WITS" ] || { echo "no wits binary at $WITS (cargo build --release first)"; exit 1; }
 CASES=("$@")
 [ ${#CASES[@]} -eq 0 ] && CASES=(cpu cpu-wait cpu-limit disk memory lock-file lock-mutex peer-pipe peer-tcp child idle
-  where-cpu where-disk run-diff pod-netns agent-follow)
+  where-cpu where-disk run-diff pod-netns pods-workload pods-nodes agent-follow)
 
 # With kernel.yama.ptrace_scope >= 1 (the Ubuntu default) an ordinary user
 # cannot read the system call of a process that is not its descendant, so
@@ -37,6 +37,9 @@ for c in "${CASES[@]}"; do
   while IFS= read -r want; do
     grep -qF -- "$want" <<<"$out" || { ok=0; printf '      missing: %s\n' "$want"; }
   done < <(sed -n 's/^# expect: //p' "$f")
+  while IFS= read -r bad; do
+    grep -qF -- "$bad" <<<"$out" && { ok=0; printf '      unexpected: %s\n' "$bad"; }
+  done < <(sed -n 's/^# reject: //p' "$f")
   if [ $ok -eq 1 ]; then
     printf 'ok    %s\n' "$c"; pass=$((pass + 1))
   else

@@ -20,6 +20,7 @@ pub const PORT: u16 = 7477;
 /// How many agents a question may pass through.
 const MAX_HOPS: u32 = 3;
 
+#[derive(Clone)]
 pub struct Config {
     /// Peer agents, as given: "host:port" entries, each of which may
     /// resolve to many addresses.
@@ -96,6 +97,19 @@ fn ask_all(
     timeout: Duration,
     accept: fn(&Value) -> bool,
 ) -> (Option<(String, Value)>, usize, Vec<String>) {
+    let (mut got, n, errs) = ask(cfg, path, timeout, accept, true);
+    (got.pop(), n, errs)
+}
+
+/// Ask every peer at once; the answers `accept` takes (only the first one
+/// when `first`), how many peers were asked, and the errors.
+fn ask(
+    cfg: &Config,
+    path: &str,
+    timeout: Duration,
+    accept: fn(&Value) -> bool,
+    first: bool,
+) -> (Vec<(String, Value)>, usize, Vec<String>) {
     let (addrs, mut errs) = cfg.addrs();
     let n = addrs.len();
     let (tx, rx) = mpsc::channel();
@@ -113,25 +127,68 @@ fn ask_all(
         });
     }
     drop(tx);
-    let mut got = None;
+    let mut got = Vec::new();
     for r in rx.iter().take(n) {
         match r {
             Ok(body) => {
-                if got.is_none() {
-                    if let Ok(v) = json::parse(&body) {
-                        if accept(&v) {
-                            got = Some((body, v));
-                        }
+                if let Ok(v) = json::parse(&body) {
+                    if accept(&v) {
+                        got.push((body, v));
                     }
                 }
             }
             Err(e) => errs.push(e),
         }
-        if got.is_some() {
+        if first && !got.is_empty() {
             break;
         }
     }
     (got, n, errs)
+}
+
+/// Every other node's processes for a pod or workload target.
+pub fn group_remote(
+    cfg: &Config,
+    target: &str,
+    secs: f64,
+    stacks: bool,
+) -> (Vec<crate::group::Remote>, Vec<String>) {
+    let path = format!(
+        "/v1/group?target={}&secs={secs}&stacks={}",
+        http::encode(target),
+        stacks as u8
+    );
+    let timeout = Duration::from_secs_f64(secs + 15.0);
+    let (got, _, errs) = ask(cfg, &path, timeout, |v| v.get("found").bool() == Some(true), false);
+    (
+        got.iter().map(|(_, v)| crate::group::remote_of(target, v)).collect(),
+        errs,
+    )
+}
+
+/// Explain a target on one named node, following its blame onward.
+pub fn explain_on(
+    cfg: &Config,
+    node: &str,
+    target: &str,
+    secs: f64,
+    stacks: bool,
+) -> Result<(String, Value), String> {
+    let path = format!(
+        "/v1/explain?target={}&node={}&secs={secs}&stacks={}&hops=1",
+        http::encode(target),
+        http::encode(node),
+        stacks as u8
+    );
+    let timeout = Duration::from_secs_f64(secs * f64::from(MAX_HOPS) + 15.0);
+    match ask_all(cfg, &path, timeout, |v| v.get("found").bool() == Some(true)) {
+        (Some(x), _, _) => Ok(x),
+        (None, _, errs) => Err(if errs.is_empty() {
+            format!("the agent on {node} could not explain {target}")
+        } else {
+            errs.join("; ")
+        }),
+    }
 }
 
 /// If the answer blames a connection to another machine, find out from the
@@ -293,15 +350,30 @@ fn handle(r: &http::Request, cfg: &Config, node: &str) -> (u16, String) {
                 None => not_found(),
             }
         }
-        // Explain a pid, a name or a pod on this node.
+        // This node's processes for a pod or workload target.
+        "/v1/group" => {
+            let Some(t) = param(r, "target") else {
+                return (400, "{\"error\":\"target\"}".into());
+            };
+            if !t.contains('/') {
+                return (400, "{\"error\":\"target must be namespace/name\"}".into());
+            }
+            let (secs, stacks, _) = opts_of(r);
+            (200, crate::group::serve(t, secs, stacks, node))
+        }
+        // Explain a pid, a name or a pod on this node (only on the node
+        // named, when one is: pids mean different processes elsewhere).
         "/v1/explain" => {
             let Some(t) = param(r, "target") else {
                 return (400, "{\"error\":\"target\"}".into());
             };
+            if param(r, "node").is_some_and(|n| n != node) {
+                return not_found();
+            }
             let (secs, stacks, hops) = opts_of(r);
             let pid = match t.parse::<i32>() {
                 Ok(p) if p > 0 => linux::check(p).ok().map(|_| p),
-                _ if t.contains('/') => k8s::pod_pids(t).ok().map(|v| v[0].0),
+                _ if t.contains('/') => k8s::pod_pids(t).ok().map(|v| v[0]),
                 _ => linux::resolve(t).ok().map(|x| x.0),
             };
             let Some(pid) = pid else { return not_found() };

@@ -8,6 +8,32 @@
 
 [English](README.md)
 
+## 写给编程智能体
+
+如果你是一个编程智能体，遇到了慢、卡住或没有进展的情况，先测量再猜测：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/aryehlev/wits/main/install.sh | sh   # 一个二进制文件，不需要 root
+wits --json <pid|进程名>        # 为什么慢：原因、具体对象、该怪谁、哪个函数哪一行
+wits --json                    # 不知道是哪个进程？列出现在等待最多的进程
+wits run -n 5 -o before.json -- <命令...>   # 改动之前；改动之后用 -o after.json 再跑一次
+wits diff --json before.json after.json     # 有没有用？结论：faster | slower | no clear change
+```
+
+- 读取 `summary`、`cause`、`what`、`where` 和 `blame`。如果 `blame.kind` 是 `process`，
+  接着问 wits `blame.pid` 这个进程，直到答案是 `cpu`、`disk`、`memory`、cgroup 限额、
+  远程主机或一个空闲的进程。
+- 如实报告 `diff` 的结论：`no clear change` 不是提速。只对可以安全重复运行的命令使用 `-n`。
+- MCP：`claude mcp add wits -- wits mcp`（任何 MCP 客户端：命令 `wits`，参数 `mcp`）提供
+  `wits_explain`、`wits_overview`、`wits_profile`、`wits_run` 和 `wits_diff`。支持页面的
+  宿主（MCP Apps）还会显示[性能视图](#看得见的结果)。支持 skill 的工具可以复制
+  [`skills/why-is-this-slow`](skills/why-is-this-slow/SKILL.md)。
+- Kubernetes：在节点上用 `wits --json <命名空间>/<pod>` 或 `<命名空间>/<deployment>`，
+  在任何地方用 `kubectl wits -n <命名空间> deploy/<名称> --json`（见
+  [Kubernetes](#kubernetes)）。
+- wits 从不修改或向它观察的进程发信号。不用 `sudo` 时只能看到你自己的进程，在 Linux 上
+  也没有 CPU 上的调用栈。
+
 ```console
 $ wits deploy
 deploy (pid 2655) is waiting for a lock: 100% of its time over the last 2.0s
@@ -56,10 +82,13 @@ Kubernetes 的用法见[下文](#kubernetes)。
 ```sh
 wits <pid|进程名>             # 这个进程为什么慢？慢在代码的哪里？
 wits                         # 现在哪些进程等待得最久？
+wits <目标> <目标>...          # 一次看多个，最忙的排在前面
 wits profile <pid|进程名>     # 每一种原因，以及它最热的调用路径
 wits run -- <命令...>         # 运行一条命令：它的时间花到哪里去了？
 wits diff before.json after.json   # 我的改动有没有用？
-wits <命名空间>/<pod>          # 一个 pod 里最忙的进程（Linux）
+wits <命名空间>/<pod>          # 一个 pod：它的每个进程（Linux）
+wits <命名空间>/<deployment>   # 所有副本，最忙的排在前面（Linux）
+wits mcp                     # 给编程智能体用的 MCP 服务器
 ```
 
 | 选项 | 含义 |
@@ -68,7 +97,8 @@ wits <命名空间>/<pod>          # 一个 pod 里最忙的进程（Linux）
 | `--json` | 机器可读的输出，供脚本和编程智能体使用 |
 | `--no-follow` | 不要跟进到进程正在等待的子进程 |
 | `--no-stacks` | 不收集调用栈（没有 `where`） |
-| `--folded` | 与 `profile` 一起用：输出折叠栈，供 `flamegraph.pl` 使用 |
+| `--folded` | 与 `profile` 一起用：输出折叠栈，供 `flamegraph.pl`、inferno 或 speedscope 使用 |
+| `--html <文件>` | 同时把答案写成一个网页，按原因分别给出火焰图 |
 | `-o <文件>` | 与 `run` 一起用：保存报告，供 `diff` 使用 |
 | `-n <次数>` | 与 `run` 一起用：把命令运行这么多次 |
 | `--peers <列表>` | 其他机器上的 wits agent，用来把归因跟进过去 |
@@ -136,6 +166,24 @@ libbpf，什么都不用装。
   `--yjit-perf`、`+JPperf true`），而 `wits run` 会替你设置那些环境变量形式的开关。
 - **macOS** 只显示原生栈帧：解释型代码的函数看不到。
 
+### 看得见的结果
+
+给任何命令加上 `--html <文件>`，wits 还会把答案写成一个自包含的网页：最上面是答案，下面是
+每种原因各自的火焰图。点击一个栈帧可以放大。
+
+```sh
+sudo wits run --html run.html -- ./server --selftest
+```
+
+![wits 生成的页面：按原因划分的时间，以及每种原因的火焰图](demo/profile.png)
+
+同一个页面也能显示一组 pod（点击查看各自的答案）、一次 `diff` 或总览。支持 MCP Apps 的
+MCP 宿主在显示 wits 工具的结果时，用的也是这个页面。
+
+要深入分析调用栈，请使用专门的工具：`wits profile --folded <pid>` 输出以原因为根
+（`[cpu]`、`[disk]`、`[lock]`…）的折叠栈，可供 `flamegraph.pl`、
+[inferno](https://github.com/jonhoo/inferno) 或 [speedscope](https://www.speedscope.app) 使用。
+
 ## 改进循环
 
 `wits run` 启动一条命令，观察它以及它启动的所有进程直到退出，然后报告时间花到了哪里，
@@ -168,23 +216,63 @@ faster: 515ms → 165ms (−68%), beyond run-to-run noise (the runs do not overl
 ## Kubernetes
 
 wits 会为它报告的每个进程标出所在的 pod 和容器，信息来自 cgroup 路径和 kubelet 的日志
-目录，不需要访问 API。在节点上，`wits <命名空间>/<pod>[/<容器>]` 解释一个 pod 里最忙的
-进程；如果一个进程在等某个连接，wits 会跟进到节点上持有另一端的容器或 pod，经过 Service
-地址也可以。
+目录，不需要访问 API。在节点上：
 
-要跨节点追查归因，在每个节点上运行 agent：
+```sh
+wits shop/api-7d9f-x2k4q       # 一个 pod：它的每个进程，最忙的那个给出完整答案
+wits shop/api-7d9f-x2k4q/api   # 一个容器
+wits shop/api                  # 名为 api 的 Deployment（或 StatefulSet、DaemonSet、Job）的所有副本
+```
+
+```console
+$ wits shop/web
+shop/web: 3 pods, busiest first (2.0s)
+  pod                      process                now        why
+  web-7d9f8b6c5-x2k4q/app  python3 (12738)        disk 96%   fsync() on /data/log.bin, device sda1 (100% busy)
+  web-7d9f8b6c5-b5n8w/app  sh (12756)             cpu 96%    running its own code (100% user, 0% kernel)
+  web-7d9f8b6c5-zz9rt/app  sleep (12765)          idle       asleep on its own timer
+
+The busiest, web-7d9f8b6c5-x2k4q/app:
+python3 (pid 12738, pod shop/web-7d9f8b6c5-x2k4q/app) is waiting for disk: 96% of its time over the last 2.0s
+  what   fsync() on /data/log.bin, device sda1 (100% busy)
+  blame  its own I/O: it read 0 B, wrote 8.7 MB; no other visible process is doing more
+```
+
+副本是根据 Kubernetes 给它们起的名字识别的（`api-<hash>-<id>`、`api-0` 等），所以
+`shop/api` 不会匹配名为 `api-gateway` 的 Deployment。在一个 pod 里，先解释每个容器最忙
+的进程，再解释任何容器的第二个进程，所以一个忙碌的 sidecar 不会掩盖应用本身。如果一个进程
+在等某个连接，wits 会跟进到节点上持有另一端的容器或 pod，经过 Service 地址也可以。
+
+### 在你的电脑上：`kubectl wits`
+
+```sh
+cp deploy/kubectl-wits ~/.local/bin/          # kubectl 插件
+kubectl wits shop/api-7d9f-x2k4q              # 一个 pod
+kubectl wits -n shop deploy/api               # 所有副本，在所有节点上
+kubectl wits -n shop -l app=api --json        # 按标签选 pod
+kubectl wits node node-b                      # 一个节点上在等什么
+```
+
+它通过 API 找到 pod 和它们所在的节点，然后在这些节点上运行 wits。集群里不需要预先安装
+任何东西：没有下面的 DaemonSet 时，`kubectl wits` 会在每个相关节点上启动一个短暂的特权
+pod（`hostPID`、只读的 `/var/log`、镜像 `ghcr.io/aryehlev/wits`），在里面运行 wits，结束后
+删除这些 pod；它们也会在 10 分钟后自行停止。你需要有创建特权 pod 的权限。如果命名空间的
+Pod Security 策略禁止特权 pod，把 `WITS_POD_NAMESPACE` 设为一个允许的命名空间。
+
+### 跨节点追查归因
+
+使用短暂 pod 时，wits 只在它启动了 pod 的那些节点之间追查归因。要追查到任何节点，在每个
+节点上运行 agent：
 
 ```sh
 kubectl create namespace wits
 kubectl -n wits create secret generic wits-token --from-literal=token="$(head -c 32 /dev/urandom | base64)"
 kubectl apply -f deploy/kubernetes/wits.yaml
-cp deploy/kubectl-wits ~/.local/bin/           # kubectl 插件
-kubectl wits shop/api-7d9f
 ```
 
-`kubectl wits` 在 pod 所在节点的 agent 里运行 wits。当答案是一条通往其他节点的连接时，wits
-会询问其他 agent（全部 agent，通过一个 headless Service 找到，没有中心服务器）谁持有另一端。
-持有者所在节点的 agent 用同样的方式解释那个进程，答案会显示在 blame 下面：
+这之后 `kubectl wits` 会使用 pod 所在节点上的 agent。当答案是一条通往其他节点的连接时，
+wits 会询问其他 agent（全部 agent，通过一个 headless Service 找到，没有中心服务器）谁持有
+另一端。持有者所在节点的 agent 用同样的方式解释那个进程，答案会显示在 blame 下面：
 
 ```console
 python3 (pid 2) is waiting for another process: 100% of its time over the last 2.0s
@@ -197,7 +285,8 @@ python3 (pid 2) is waiting for another process: 100% of its time over the last 2
 
 （来自 `cases/agent-follow.sh`，其中两个节点是同一台机器上的两个命名空间，所以 pid 很小。）
 它能穿过 Service 的 DNAT，因为它匹配的是客户端自己的地址，而服务端看到的正是这个地址。
-最多跟进三跳。
+最多跟进三跳。对于一个 Deployment，各节点的 agent 也会解释本节点上的副本，所以在任何节点上
+运行 `wits shop/api` 都能覆盖全部副本。
 
 agent 能做什么，供你判断：它以特权模式和 `hostPID` 运行，这样才能读取节点上的每个进程并
 加载 eBPF 程序；它以只读方式挂载 `/var/log` 来识别 pod。它不改变任何东西。agent 只回应带有
@@ -217,20 +306,45 @@ agent 能做什么，供你判断：它以特权模式和 `hostPID` 运行，这
 `sample` 需要一点时间才能附加上去，所以在 `wits run` 中，存活不到 60 毫秒的进程没有调用栈，
 不到半秒的运行统计到的函数时间会偏少；macOS 上没有 agent。
 
-## 在编程智能体中使用
+## 编程智能体：MCP 服务器和 skill
 
-`skills/why-is-this-slow/SKILL.md` 教会编程智能体（Claude Code 以及其他支持 skill 的工具）
-什么时候运行 wits、如何解读结果，以及如何用 `wits run` 和 `wits diff` 检验自己的修复。把这个
-目录复制到你的 skills 目录：
+`wits mcp` 是一个通过标准输入输出通信的 MCP 服务器。在 Claude Code 中添加：
+
+```sh
+claude mcp add wits -- wits mcp
+```
+
+在任何 MCP 客户端中，命令是 `wits`，参数是 `mcp`，例如：
+
+```json
+{ "mcpServers": { "wits": { "command": "wits", "args": ["mcp"] } } }
+```
+
+| 工具 | 作用 |
+| --- | --- |
+| `wits_explain` | 一个或多个进程、pod 或工作负载为什么慢（`target` 或 `targets`、`seconds`） |
+| `wits_overview` | 现在等待最多的进程 |
+| `wits_profile` | 一个进程，以及按原因划分的全部调用栈，用于火焰图 |
+| `wits_run` | 运行一条命令（`command`、`repeat`、`save`、`cwd`），报告时间花在哪里 |
+| `wits_diff` | 比较两次保存的运行：faster、slower 或 no clear change |
+
+每个工具都用 `--json` 运行 `wits`，把结果同时作为文本和结构化内容返回，所以它和对应的命令
+完全一样。每个工具都可以把[页面](#看得见的结果)写到文件（`html_file`）；支持 MCP Apps 的
+宿主会把页面和结果一起显示。服务器会告诉智能体怎么用这些工具：先测量，顺着归因追下去，
+如实报告 `diff` 的结论。如果要给它 root 权限（eBPF 调用栈、其他用户的进程），改为注册
+`sudo wits mcp`，前提是你信任这个智能体。
+
+对于支持 skill 的智能体（Claude Code 等），`skills/why-is-this-slow/SKILL.md` 教它什么时候
+运行 wits、如何解读结果，以及如何用 `wits run` 和 `wits diff` 检验修复。把这个目录复制到
+你的 skills 目录：
 
 ```sh
 mkdir -p ~/.claude/skills
 cp -r skills/why-is-this-slow ~/.claude/skills/
 ```
 
-然后直接问：“测试跑得特别慢，为什么？”智能体会运行 `wits --json`，读取 `cause`、`what`、
-`where` 和 `blame`，根据事实而不是猜测来行动。改完代码后，它会运行 `wits diff`，告诉你改动
-有没有用。
+然后直接问：“测试跑得特别慢，为什么？”智能体会运行 wits，读取 `cause`、`what`、`where` 和
+`blame`，根据事实而不是猜测来行动。改完代码后，它会运行 `wits diff`，告诉你改动有没有用。
 
 ## 工作原理
 
@@ -270,13 +384,16 @@ cp -r skills/why-is-this-slow ~/.claude/skills/
   元凶”。
 - **内存需要证据。** 如果没有换入，也没有触到 cgroup 限额，从磁盘读回的页会被报告为 `disk`。
 - **虚拟机：** 被 hypervisor 拿走的 CPU 时间会被报告为 `cpu-wait`，且找不到责任方。
-- **其他节点需要 agent。** 没有 agent 时，远程地址就只是一台远程主机。
+- **其他节点需要 agent。** 没有 agent 时，远程地址就只是一台远程主机。没有 DaemonSet 时，
+  `kubectl wits` 只在它启动了 pod 的节点之间追查归因。
+- **副本是按名字识别的。** 不是通过 Deployment、StatefulSet、DaemonSet 或 Job 创建、而是你
+  自己命名的 pod，只能用确切的名字找到。`kubectl wits` 则通过 API 查找（`deploy/<名称>`、`-l`）。
 - **完全不涉及：** GPU 等待，以及进程内部从不进入内核的问题（慢算法只会显示为 `cpu`，但现在
   会指出慢在哪个函数）。
 
 [`cases/`](cases) 里的每个脚本制造一种慢的情况，并写明 wits 必须给出的答案。
 `cases/run.sh` 会全部运行一遍，这就是测试套件。再用 root 运行一次，可以覆盖 eBPF 调用栈、
-cgroup 限额、pod 和 agent。
+cgroup 限额、pod、跨节点的副本和 agent。
 
 ## 系统要求
 

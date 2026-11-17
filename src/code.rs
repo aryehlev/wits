@@ -357,6 +357,70 @@ fn folded_name(f: &Frame) -> String {
     }
 }
 
+/// Every stack, for a flame graph, as JSON: each frame once
+/// (`[func, module, file, line, kernel]`), each stack as
+/// `[cause, pid, microseconds, [frame indices from the root]]`, and the
+/// process names. The heaviest `max` stacks are kept.
+pub fn flame_json(st: &Stacks, max: usize) -> String {
+    use crate::out::esc;
+    // (cause, pid, frames leaf first)
+    type Key<'a> = (Cat, i32, &'a [usize]);
+    let mut agg: HashMap<Key, f64> = HashMap::new();
+    for s in &st.samples {
+        *agg.entry((s.cat, s.pid, s.frames.as_slice())).or_default() += s.ns;
+    }
+    let mut v: Vec<(Key, f64)> = agg.into_iter().filter(|x| x.1 >= 1000.0).collect();
+    v.sort_by(|a, b| b.1.total_cmp(&a.1));
+    v.truncate(max);
+    let mut ids: HashMap<usize, usize> = HashMap::new();
+    let mut used: Vec<usize> = Vec::new();
+    let stacks: Vec<String> = v
+        .iter()
+        .map(|((c, pid, fr), ns)| {
+            let f: Vec<String> = fr
+                .iter()
+                .rev()
+                .map(|&i| {
+                    let id = *ids.entry(i).or_insert_with(|| {
+                        used.push(i);
+                        used.len() - 1
+                    });
+                    id.to_string()
+                })
+                .collect();
+            format!("[{},{pid},{},[{}]]", esc(c.key()), (ns / 1000.0).round() as u64, f.join(","))
+        })
+        .collect();
+    let frames: Vec<String> = used
+        .iter()
+        .map(|&i| {
+            let f = &st.frames[i];
+            format!(
+                "[{},{},{},{},{}]",
+                esc(&f.func),
+                esc(&f.module),
+                f.file.as_deref().map(esc).unwrap_or_else(|| "null".into()),
+                f.line.map(|l| l.to_string()).unwrap_or_else(|| "null".into()),
+                f.kernel
+            )
+        })
+        .collect();
+    let mut pids: Vec<i32> = v.iter().map(|x| x.0 .1).collect();
+    pids.sort_unstable();
+    pids.dedup();
+    let procs: Vec<String> = pids
+        .iter()
+        .map(|p| format!("\"{p}\":{}", esc(st.comms.get(p).map(String::as_str).unwrap_or(""))))
+        .collect();
+    format!(
+        "{{\"source\":{},\"frames\":[{}],\"stacks\":[{}],\"procs\":{{{}}}}}",
+        esc(st.source),
+        frames.join(","),
+        stacks.join(","),
+        procs.join(",")
+    )
+}
+
 /// Folded stacks ("a;b;c 123"), one line per stack, rooted at the cause,
 /// weighted in microseconds. Feed to flamegraph.pl, inferno or speedscope.
 pub fn folded(st: &Stacks, with_idle: bool) -> String {

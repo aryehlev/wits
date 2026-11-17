@@ -1169,21 +1169,84 @@ pub fn analyze(pid: i32, opts: Opts) -> Option<Answer> {
 
 /// The answer, and the stacks behind its code view.
 pub fn analyze_full(pid: i32, opts: Opts) -> Option<(Answer, Option<Stacks>)> {
-    let mut pid = pid;
-    let mut followed = Vec::new();
-    if opts.follow {
-        for _ in 0..8 {
-            if !waiting_on_child(pid) {
-                break;
-            }
-            let Some((child, _)) = newest_child(pid) else {
-                break;
-            };
-            followed.push((pid, proc::comm(pid).unwrap_or_default()));
-            pid = child;
-        }
-    }
+    let (pid, followed) = if opts.follow { follow_down(pid) } else { (pid, Vec::new()) };
+    analyze_with(pid, followed, opts, None)
+}
 
+/// Parents skipped because they were only waiting for a child.
+type Followed = Vec<(i32, String)>;
+
+/// A shell or `make` that is only waiting for its child: the child doing the
+/// waiting, and the parents skipped on the way.
+fn follow_down(mut pid: i32) -> (i32, Followed) {
+    let mut followed = Vec::new();
+    for _ in 0..8 {
+        if !waiting_on_child(pid) {
+            break;
+        }
+        let Some((child, _)) = newest_child(pid) else {
+            break;
+        };
+        followed.push((pid, proc::comm(pid).unwrap_or_default()));
+        pid = child;
+    }
+    (pid, followed)
+}
+
+/// One eBPF session for several analyses that run at the same time,
+/// instead of one per process (each opens an event on every CPU).
+struct Shared {
+    session: std::sync::Mutex<Option<Result<crate::ebpf::Session, String>>>,
+    /// Every analysis has finished sampling before the stacks are read.
+    done: std::sync::Barrier,
+    raw: std::sync::OnceLock<Result<HashMap<i32, Vec<crate::ebpf::RawStack>>, String>>,
+}
+
+/// Several processes, watched over the same window. The answers come back
+/// in the order of `pids`; a process that exits, or a duplicate (two
+/// parents waiting for the same child), gives None.
+pub fn analyze_many(pids: &[i32], opts: Opts) -> Vec<Option<(Answer, Option<Stacks>)>> {
+    let mut seen = HashSet::new();
+    let targets: Vec<Option<(i32, Followed)>> = pids
+        .iter()
+        .map(|&p| {
+            let t = if opts.follow { follow_down(p) } else { (p, Vec::new()) };
+            seen.insert(t.0).then_some(t)
+        })
+        .collect();
+    let live: Vec<i32> = targets.iter().flatten().map(|t| t.0).collect();
+    if live.len() == 1 {
+        return targets
+            .into_iter()
+            .map(|t| t.and_then(|(p, f)| analyze_with(p, f, opts, None)))
+            .collect();
+    }
+    let shared = std::sync::Arc::new(Shared {
+        session: std::sync::Mutex::new(
+            opts.stacks.then(|| crate::ebpf::Session::start(&live, false, FREQ)),
+        ),
+        done: std::sync::Barrier::new(live.len()),
+        raw: std::sync::OnceLock::new(),
+    });
+    let handles: Vec<_> = targets
+        .into_iter()
+        .map(|t| {
+            let shared = shared.clone();
+            t.map(|(p, f)| std::thread::spawn(move || analyze_with(p, f, opts, Some(&*shared))))
+        })
+        .collect();
+    handles
+        .into_iter()
+        .map(|h| h.and_then(|h| h.join().ok().flatten()))
+        .collect()
+}
+
+fn analyze_with(
+    pid: i32,
+    followed: Vec<(i32, String)>,
+    opts: Opts,
+    shared: Option<&Shared>,
+) -> Option<(Answer, Option<Stacks>)> {
     let cpu_chain = if opts.light {
         Vec::new()
     } else {
@@ -1198,19 +1261,43 @@ pub fn analyze_full(pid: i32, opts: Opts) -> Option<(Answer, Option<Stacks>)> {
     let hits0 = sys::mem_limit_hits(&mem_chain);
     let snap0 = (!opts.light).then(SysSnap::take);
 
-    let session = opts
-        .stacks
+    let session = (opts.stacks && shared.is_none())
         .then(|| crate::ebpf::Session::start(&[pid], false, FREQ));
-    let p = sample::sample(pid, opts.dur, opts.stacks)?;
-    let raw = match &session {
+    let p = sample::sample(pid, opts.dur, opts.stacks);
+    let own = match &session {
         Some(Ok(s)) => Some(s.collect()),
         _ => None,
     };
-    let why_no_cpu = match &session {
+    let mut why_no_cpu = match &session {
         Some(Err(e)) => Some(e.clone()),
         _ => None,
     };
     drop(session);
+    let mut raw: Option<&[crate::ebpf::RawStack]> = own.as_deref();
+    if let Some(sh) = shared {
+        // Every analysis gets here, even one whose process has gone, or
+        // the others would wait for it forever.
+        sh.done.wait();
+        let all = sh.raw.get_or_init(|| {
+            match sh.session.lock().ok().and_then(|mut s| s.take()) {
+                Some(Ok(s)) => {
+                    let mut by: HashMap<i32, Vec<crate::ebpf::RawStack>> = HashMap::new();
+                    for r in s.collect() {
+                        by.entry(r.tgid).or_default().push(r);
+                    }
+                    Ok(by)
+                }
+                Some(Err(e)) => Err(e),
+                None => Err(String::new()),
+            }
+        });
+        match all {
+            Ok(by) => raw = Some(by.get(&pid).map(Vec::as_slice).unwrap_or(&[])),
+            Err(e) if !e.is_empty() => why_no_cpu = Some(e.clone()),
+            Err(_) => {}
+        }
+    }
+    let p = p?;
 
     let delta = snap0.map(|a| SysDelta::between(&a, &SysSnap::take()));
     let thr1 = sys::throttled_ns(&cpu_chain);
@@ -1343,7 +1430,7 @@ pub fn analyze_full(pid: i32, opts: Opts) -> Option<(Answer, Option<Stacks>)> {
             prof::Inputs {
                 pids: vec![(pid, p.comm.clone())],
                 scans,
-                raw: raw.as_deref(),
+                raw,
                 cpu_ns: cat_ns.get(&Cat::Cpu).copied().unwrap_or(0.0),
                 rq_ns: cat_ns.get(&Cat::CpuWait).copied().unwrap_or(0.0),
                 why_no_cpu,

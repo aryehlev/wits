@@ -11,7 +11,9 @@ mod code;
 mod json;
 mod lang;
 mod out;
+mod mcp;
 mod run;
+mod ui;
 
 #[cfg(target_os = "linux")]
 mod bpf;
@@ -23,6 +25,8 @@ mod ebpf;
 mod explain;
 #[cfg(target_os = "linux")]
 mod http;
+#[cfg(target_os = "linux")]
+mod group;
 #[cfg(target_os = "linux")]
 mod k8s;
 #[cfg(target_os = "linux")]
@@ -70,18 +74,25 @@ USAGE
                              time went; -o saves the report for diff
   wits diff <before.json> <after.json>
                              compare two runs: did the change help, and where?
+  wits <target> <target>...  several at once, busiest first
   wits <namespace>/<pod>[/<container>]
-                             (Linux) a Kubernetes pod's busiest process
+                             (Linux) a Kubernetes pod: each of its processes
+  wits <namespace>/<deployment|statefulset|daemonset>
+                             (Linux) every replica, on this node and, with
+                             agents, on the others
   wits agent [--listen <addr:port>] [--peers <host[:port],...>]
                              (Linux) answer other nodes' wits: who holds this
                              connection, and why is it slow?
+
+  wits mcp                   an MCP server on stdin/stdout for coding agents
 
 OPTIONS
   -t, --time <secs>   how long to watch (default 2)
       --json          machine-readable output
       --no-follow     do not descend into the child a process is waiting for
       --no-stacks     do not collect stacks (no `where`)
-      --folded        (profile) folded stacks for flame graphs
+      --folded        (profile) folded stacks for flamegraph.pl, inferno, speedscope
+      --html <file>   also write the answer as a web page, with flame graphs
       --peers <list>  wits agents on other machines to follow blame to
                       (host[:port],...; a name may resolve to many;
                       default $WITS_PEERS; token from $WITS_TOKEN(_FILE))
@@ -116,6 +127,7 @@ pub struct Args {
     pub repeat: u32,
     pub peers: Option<String>,
     pub listen: Option<String>,
+    pub html: Option<String>,
     pub rest: Vec<String>,
 }
 
@@ -146,6 +158,9 @@ fn parse(args: impl Iterator<Item = String>) -> Args {
             }
             "--peers" => {
                 a.peers = Some(it.next().unwrap_or_else(|| die("--peers needs a list", 2)))
+            }
+            "--html" => {
+                a.html = Some(it.next().unwrap_or_else(|| die("--html needs a file name", 2)))
             }
             "--listen" => {
                 a.listen = Some(it.next().unwrap_or_else(|| die("--listen needs addr:port", 2)))
@@ -232,9 +247,26 @@ fn explain(a: &Args, profile: bool) {
             Some(s) if !s.is_empty() => println!("{}", code::folded(s, false)),
             _ => die("no stacks were collected", 1),
         }
-    } else if a.json {
-        println!("{}", out::json(&ans));
-    } else if profile {
+        return;
+    }
+    // `profile --json` and the page carry every stack, for a flame graph.
+    let page = a.html.is_some();
+    if a.json || page {
+        let mut j = out::json(&ans);
+        if profile || page {
+            if let Some(s) = stacks.as_ref().filter(|s| !s.is_empty()) {
+                j = ui::with_field(&j, "flame", &code::flame_json(s, 3000));
+            }
+        }
+        if let Some(p) = &a.html {
+            ui::write(p, &j);
+        }
+        if a.json {
+            println!("{j}");
+            return;
+        }
+    }
+    if profile {
         println!("{}", out::profile_text(&ans, &style));
     } else {
         println!("{}", out::text(&ans, &style));
@@ -267,6 +299,12 @@ fn remote_pod(a: &Args, t: &str, local_err: &str) -> ! {
 fn main() {
     let mut argv = std::env::args().skip(1).peekable();
     let cmd = argv.peek().cloned();
+    // `wits ... | head`: exit quietly when the reader goes away. The
+    // long-running servers keep ignoring SIGPIPE, so a client that hangs
+    // up cannot stop them.
+    if !matches!(cmd.as_deref(), Some("agent") | Some("mcp")) {
+        unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+    }
     match cmd.as_deref() {
         Some("profile") => {
             argv.next();
@@ -275,6 +313,10 @@ fn main() {
         Some("run") => {
             argv.next();
             std::process::exit(run::run(&parse(argv)));
+        }
+        Some("mcp") => {
+            argv.next();
+            std::process::exit(mcp::serve());
         }
         Some("diff") => {
             argv.next();
@@ -292,12 +334,26 @@ fn main() {
                 let style = out::Style::detect();
                 let dur = Duration::from_secs_f64(a.secs.unwrap_or(2.0));
                 let (rows, ms) = platform::overview(dur);
+                if let Some(p) = &a.html {
+                    ui::write(p, &out::overview_json(&rows, ms));
+                }
                 if a.json {
                     println!("{}", out::overview_json(&rows, ms));
                 } else {
                     println!("{}", out::overview_text(&rows, ms, &style));
                 }
             } else {
+                #[cfg(target_os = "linux")]
+                if a.rest.len() > 1 || a.rest[0].contains('/') && !a.rest[0].starts_with('/') {
+                    let opts = platform::Opts {
+                        dur: Duration::from_secs_f64(a.secs.unwrap_or(2.0)),
+                        follow: a.follow,
+                        light: false,
+                        stacks: a.stacks,
+                    };
+                    group::explain(&a.rest, opts, a.peers.as_deref(), a.json, a.html.as_deref());
+                    return;
+                }
                 explain(&a, false);
             }
         }

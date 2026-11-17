@@ -9,6 +9,35 @@ No root needed; with root it sees more.
 
 [简体中文](README.zh-CN.md)
 
+## For coding agents
+
+If you are a coding agent and something is slow, hanging or stuck, measure
+before you guess:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/aryehlev/wits/main/install.sh | sh   # one binary, no root
+wits --json <pid|name>        # why is it slow: cause, object, who is to blame, function and line
+wits --json                   # don't know which process? the ones waiting most right now
+wits run -n 5 -o before.json -- <command...>   # before a change; again with -o after.json
+wits diff --json before.json after.json        # did it help? verdict: faster | slower | no clear change
+```
+
+- Read `summary`, `cause`, `what`, `where` and `blame`. When `blame.kind`
+  is `process`, ask wits about `blame.pid` next, until the answer is `cpu`,
+  `disk`, `memory`, a cgroup limit, a remote host or an idle process.
+- Report the `diff` verdict as it is: `no clear change` is not a speedup. Only
+  repeat (`-n`) commands that are safe to run again.
+- MCP: `claude mcp add wits -- wits mcp` (any MCP client: command `wits`,
+  argument `mcp`) gives you `wits_explain`, `wits_overview`, `wits_profile`,
+  `wits_run` and `wits_diff`. Hosts that show pages (MCP Apps) also get the
+  [profile view](#see-it). For skills, copy
+  [`skills/why-is-this-slow`](skills/why-is-this-slow/SKILL.md).
+- Kubernetes: `wits --json <namespace>/<pod>` or `<namespace>/<deployment>`
+  on a node, or `kubectl wits -n <namespace> deploy/<name> --json` from
+  anywhere (see [Kubernetes](#kubernetes)).
+- wits never changes or signals the processes it watches. Without `sudo` it
+  sees only your own processes, and on Linux no on-CPU stacks.
+
 ```console
 $ wits deploy
 deploy (pid 2655) is waiting for a lock: 100% of its time over the last 2.0s
@@ -59,10 +88,13 @@ and Intel. For Kubernetes, see [below](#kubernetes).
 ```sh
 wits <pid|name>              # why is this process slow, and where in its code?
 wits                         # which processes are waiting most right now?
+wits <target> <target>...    # several at once, busiest first
 wits profile <pid|name>      # every cause, with its hottest call paths
 wits run -- <command...>     # run a command; where did its time go?
 wits diff before.json after.json   # did my change help?
-wits <namespace>/<pod>       # a pod's busiest process (Linux)
+wits <namespace>/<pod>       # a pod: each of its processes (Linux)
+wits <namespace>/<deployment>      # every replica, busiest first (Linux)
+wits mcp                     # an MCP server for coding agents
 ```
 
 | Option | Meaning |
@@ -71,7 +103,8 @@ wits <namespace>/<pod>       # a pod's busiest process (Linux)
 | `--json` | machine-readable output, for scripts and coding agents |
 | `--no-follow` | do not descend into the child a process is waiting for |
 | `--no-stacks` | do not collect stacks (no `where`) |
-| `--folded` | with `profile`: folded stacks, for `flamegraph.pl` |
+| `--folded` | with `profile`: folded stacks, for `flamegraph.pl`, inferno or speedscope |
+| `--html <file>` | also write the answer as a web page, with flame graphs by cause |
 | `-o <file>` | with `run`: save the report for `diff` |
 | `-n <count>` | with `run`: run the command that many times |
 | `--peers <list>` | wits agents on other machines to follow blame to |
@@ -143,6 +176,27 @@ Languages:
   `+JPperf true`), and `wits run` sets the environment ones for you.
 - **macOS** shows native frames only: interpreted functions stay hidden.
 
+### See it
+
+Add `--html <file>` to any command and wits also writes its answer as one
+self-contained web page: the answer on top, then a flame graph for each cause.
+Click a frame to zoom in.
+
+```sh
+sudo wits run --html run.html -- ./server --selftest
+```
+
+![the page wits writes: time by cause, then a flame graph per cause](demo/profile.png)
+
+The same page shows a list of pods (click one for its answer), a `diff`, or
+the overview. It is also what an MCP host shows for wits's tools, when it
+supports MCP Apps.
+
+For deeper work on the stacks, use the tools made for it: `wits profile
+--folded <pid>` writes folded stacks, rooted at the cause (`[cpu]`, `[disk]`,
+`[lock]`…), for `flamegraph.pl`, [inferno](https://github.com/jonhoo/inferno)
+or [speedscope](https://www.speedscope.app).
+
 ## The improvement loop
 
 `wits run` starts a command, watches it and everything it starts until it
@@ -178,22 +232,66 @@ instead of claiming a win. With one run each it tells you to use `-n`.
 
 wits names the pod and container of every process it reports, from the
 cgroup path and the kubelet's log directories; no API access needed. On a
-node, `wits <namespace>/<pod>[/<container>]` explains a pod's busiest
-process, and a process waiting on a connection is followed into whichever
-container or pod on the node holds the other end, through Service addresses
-too.
+node:
 
-To follow blame across nodes, run the agent on every node:
+```sh
+wits shop/api-7d9f-x2k4q       # a pod: each of its processes, the busiest in full
+wits shop/api-7d9f-x2k4q/api   # one container
+wits shop/api                  # every replica of the Deployment (or StatefulSet, DaemonSet, Job) called api
+```
+
+```console
+$ wits shop/web
+shop/web: 3 pods, busiest first (2.0s)
+  pod                      process                now        why
+  web-7d9f8b6c5-x2k4q/app  python3 (12738)        disk 96%   fsync() on /data/log.bin, device sda1 (100% busy)
+  web-7d9f8b6c5-b5n8w/app  sh (12756)             cpu 96%    running its own code (100% user, 0% kernel)
+  web-7d9f8b6c5-zz9rt/app  sleep (12765)          idle       asleep on its own timer
+
+The busiest, web-7d9f8b6c5-x2k4q/app:
+python3 (pid 12738, pod shop/web-7d9f8b6c5-x2k4q/app) is waiting for disk: 96% of its time over the last 2.0s
+  what   fsync() on /data/log.bin, device sda1 (100% busy)
+  blame  its own I/O: it read 0 B, wrote 8.7 MB; no other visible process is doing more
+```
+
+Replicas are recognised by the names Kubernetes gives them (`api-<hash>-<id>`,
+`api-0`, …), so `shop/api` does not match a Deployment called `api-gateway`.
+Within a pod, every container's busiest process is explained before any
+container's second, so a busy sidecar does not hide the application. A
+process waiting on a connection is followed into whichever container or pod
+on the node holds the other end, through Service addresses too.
+
+### From your laptop: `kubectl wits`
+
+```sh
+cp deploy/kubectl-wits ~/.local/bin/          # the kubectl plugin
+kubectl wits shop/api-7d9f-x2k4q              # a pod
+kubectl wits -n shop deploy/api               # every replica, on every node
+kubectl wits -n shop -l app=api --json        # pods by label
+kubectl wits node node-b                      # what is waiting on a node
+```
+
+It finds the pods and their nodes through the API, then runs wits on those
+nodes. Nothing needs to be installed in the cluster first: without the
+DaemonSet below, `kubectl wits` starts a short-lived privileged pod on each
+node involved (`hostPID`, `/var/log` read-only, the image
+`ghcr.io/aryehlev/wits`), runs wits there, and deletes the pods when it is
+done; they also stop on their own after 10 minutes. You need permission to
+create privileged pods. If a Pod Security policy forbids them in the
+namespace, set `WITS_POD_NAMESPACE` to one that allows them.
+
+### Following blame across nodes
+
+With the short-lived pods, wits follows blame between the nodes it was
+started on. To follow it to any node, run the agent on every node:
 
 ```sh
 kubectl create namespace wits
 kubectl -n wits create secret generic wits-token --from-literal=token="$(head -c 32 /dev/urandom | base64)"
 kubectl apply -f deploy/kubernetes/wits.yaml
-cp deploy/kubectl-wits ~/.local/bin/           # the kubectl plugin
-kubectl wits shop/api-7d9f
 ```
 
-`kubectl wits` runs wits in the agent on the pod's node. When the answer is a
+`kubectl wits` then uses the agent on the pod's node. When the answer is a
 connection to another node, wits asks the other agents (all of them, found
 through a headless Service: no central server) who holds the other end. The
 owner's agent explains that process the same way, and the answer comes back
@@ -211,7 +309,8 @@ python3 (pid 2) is waiting for another process: 100% of its time over the last 2
 (From `cases/agent-follow.sh`, where the two nodes are namespaces on one
 machine, hence the small pids.) It works through Service DNAT, because it
 matches the client's own address, which the server sees. It stops after
-three hops.
+three hops. For a Deployment, the agents also explain the replicas on their
+nodes, so `wits shop/api` on any node covers them all.
 
 What the agent can do, so you can decide: it runs privileged with `hostPID`
 so it can read every process on its node and load eBPF programs, and it
@@ -237,22 +336,51 @@ several candidates; `sample` takes a moment to attach, so in `wits run`
 processes that live under 60 ms have no stacks and runs shorter than about
 half a second undercount function time; and there is no agent.
 
-## Use it from a coding agent
+## Coding agents: MCP server and skill
 
-`skills/why-is-this-slow/SKILL.md` teaches a coding agent (Claude Code and
-others that read skills) when to run wits, how to read the answer, and how to
-use `wits run` and `wits diff` to check its own fixes. Copy the folder into
-your skills directory:
+`wits mcp` is an MCP server on stdin and stdout. Add it to Claude Code with
+
+```sh
+claude mcp add wits -- wits mcp
+```
+
+or to any MCP client as the command `wits` with the argument `mcp`, for
+example:
+
+```json
+{ "mcpServers": { "wits": { "command": "wits", "args": ["mcp"] } } }
+```
+
+| Tool | Does |
+| --- | --- |
+| `wits_explain` | why one or more processes, pods or workloads are slow (`target` or `targets`, `seconds`) |
+| `wits_overview` | the processes waiting most right now |
+| `wits_profile` | one process, with every stack by cause, for a flame graph |
+| `wits_run` | run a command (`command`, `repeat`, `save`, `cwd`) and report where its time went |
+| `wits_diff` | compare two saved runs: faster, slower or no clear change |
+
+Each tool runs `wits` with `--json` and returns that answer, as text and as
+structured content, so it does exactly what the command does. Each can also
+write the [page](#see-it) to a file (`html_file`); hosts that support MCP
+Apps show the page with the result. The server tells the agent how to use
+them: measure first, follow the blame, and report a `diff` verdict as it is.
+To give it root (eBPF stacks, other users' processes), register
+`sudo wits mcp` instead, if you trust the agent with that.
+
+For agents that read skills (Claude Code and others),
+`skills/why-is-this-slow/SKILL.md` teaches when to run wits, how to read
+the answer, and how to check a fix with `wits run` and `wits diff`. Copy the
+folder into your skills directory:
 
 ```sh
 mkdir -p ~/.claude/skills
 cp -r skills/why-is-this-slow ~/.claude/skills/
 ```
 
-Then ask: *"the test run is crawling, why?"* The agent runs `wits --json`,
-reads `cause`, `what`, `where` and `blame`, and acts on a fact instead of a
-guess. After changing the code it runs `wits diff` and reports whether the
-change helped.
+Then ask: *"the test run is crawling, why?"* The agent runs wits, reads
+`cause`, `what`, `where` and `blame`, and acts on a fact instead of a guess.
+After changing the code it runs `wits diff` and reports whether the change
+helped.
 
 ## How it works
 
@@ -310,14 +438,18 @@ On Linux, wits watches every thread of the process for two seconds:
 - **Virtual machines:** CPU time taken by the hypervisor is reported as
   `cpu-wait` with nobody to blame.
 - **Other nodes need the agent.** Without one, a remote address is just a
-  remote host.
+  remote host. `kubectl wits` without the DaemonSet follows blame only
+  between the nodes it started pods on.
+- **Replicas are recognised by name.** A pod you named yourself, not through
+  a Deployment, StatefulSet, DaemonSet or Job, is only found by its exact
+  name. `kubectl wits` asks the API instead (`deploy/<name>`, `-l`).
 - **Not covered at all:** GPU waits, and anything inside the process that
   never reaches the kernel (a slow algorithm is just `cpu`, but now with the
   function that is slow).
 
 Each case in [`cases/`](cases) starts one slow condition and states the answer
 wits must give. `cases/run.sh` runs them all; it is the test suite. Run it as
-root as well to cover eBPF stacks, cgroup limits, pods and agents.
+root as well to cover eBPF stacks, cgroup limits, pods, replicas across nodes and agents.
 
 ## Requirements
 

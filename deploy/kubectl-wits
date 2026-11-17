@@ -1,30 +1,206 @@
 #!/bin/sh
-# kubectl wits: why is this pod slow?
+# kubectl wits: why is this pod, or this workload, slow?
 #
 #   kubectl wits <namespace>/<pod>[/<container>] [wits options]
-#   kubectl wits node <node> [wits options]     the busiest waits on a node
+#   kubectl wits [-n <namespace>] <pod>|deploy/<name>|sts/<name>|ds/<name>|job/<name> [wits options]
+#   kubectl wits [-n <namespace>] -l <selector> [wits options]
+#   kubectl wits node <node> [wits options]      the busiest waits on a node
 #
-# Runs wits in the agent on the pod's node; that agent follows blame to the
-# agents on other nodes. Needs the DaemonSet in deploy/kubernetes/wits.yaml.
+# For a workload, every replica is explained and the busiest first.
+#
+# With the wits DaemonSet installed (deploy/kubernetes/wits.yaml), this runs
+# wits in its agent on the pod's node. Without it, it starts a short-lived
+# privileged pod (hostPID, read-only /var/log) on each node involved, runs
+# wits there and deletes the pods when done; they also stop on their own
+# after 10 minutes. Blame is then followed only between those nodes.
+#
+# Environment: WITS_NAMESPACE (the DaemonSet's, default wits),
+# WITS_POD_NAMESPACE (for short-lived pods, default: the DaemonSet's if it
+# exists, else default), WITS_IMAGE (default ghcr.io/aryehlev/wits:latest).
 set -eu
 NS=${WITS_NAMESPACE:-wits}
-usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
-[ $# -ge 1 ] || usage
-case $1 in
-  -h|--help) usage ;;
-  node)
-    [ $# -ge 2 ] || usage
-    node=$2; shift 2; set -- "$@" ;;
-  */*)
-    target=$1; shift
-    pns=${target%%/*}; rest=${target#*/}; pod=${rest%%/*}
-    node=$(kubectl get pod -n "$pns" "$pod" -o jsonpath='{.spec.nodeName}')
-    [ -n "$node" ] || { echo "kubectl-wits: pod $pns/$pod is not scheduled on a node" >&2; exit 1; }
-    set -- "$target" "$@" ;;
-  *) echo "kubectl-wits: give <namespace>/<pod>, or: node <node>" >&2; exit 2 ;;
-esac
-agent=$(kubectl get pod -n "$NS" -l app.kubernetes.io/name=wits \
-  --field-selector "spec.nodeName=$node" -o jsonpath='{.items[0].metadata.name}')
-[ -n "$agent" ] || { echo "kubectl-wits: no wits agent on node $node (is the DaemonSet installed?)" >&2; exit 1; }
+IMAGE=${WITS_IMAGE:-ghcr.io/aryehlev/wits:latest}
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+die() { echo "kubectl-wits: $*" >&2; exit 1; }
+
+ns= sel= target= node=
+while [ $# -gt 0 ]; do
+  case $1 in
+    -h|--help) usage ;;
+    -n|--namespace) [ $# -ge 2 ] || usage; ns=$2; shift 2 ;;
+    -n=*|--namespace=*) ns=${1#*=}; shift ;;
+    -l|--selector) [ $# -ge 2 ] || usage; sel=$2; shift 2 ;;
+    -l=*|--selector=*) sel=${1#*=}; shift ;;
+    node) [ -z "$target" ] && [ -z "$sel" ] || break
+      [ $# -ge 2 ] || usage; node=$2; shift 2; break ;;
+    -*) break ;;
+    *) [ -z "$target" ] || break; target=$1; shift ;;
+  esac
+done
+# Everything left goes to wits.
+[ -n "$target" ] || [ -n "$sel" ] || [ -n "$node" ] || usage
+[ -n "$ns" ] || ns=$(kubectl config view --minify -o jsonpath='{..namespace}' 2>/dev/null || true)
+[ -n "$ns" ] || ns=default
+
+# The pods to explain, as "namespace/pod[/container] node" lines.
+pods=
+container=
+list() { # selector
+  kubectl get pods -n "$ns" -l "$1" --field-selector=status.phase=Running \
+    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.nodeName}{"\n"}{end}'
+}
+if [ -n "$node" ]; then
+  :
+elif [ -n "$sel" ]; then
+  pods=$(list "$sel")
+  [ -n "$pods" ] || die "no running pods match -l $sel in namespace $ns"
+else
+  case $target in
+    deploy/*|deployment/*|deployments/*|sts/*|statefulset/*|statefulsets/*|ds/*|daemonset/*|daemonsets/*|rs/*|replicaset/*|replicasets/*|job/*|jobs/*)
+      s=$(kubectl get "$target" -n "$ns" \
+        -o go-template='{{range $k, $v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}') \
+        || die "cannot read $target in namespace $ns"
+      [ -n "$s" ] || die "$target has no label selector wits can use"
+      pods=$(list "${s%,}")
+      [ -n "$pods" ] || die "$target has no running pods" ;;
+    pod/*|pods/*|po/*) target=${target#*/} ;;
+  esac
+  if [ -z "$pods" ]; then
+    case $target in
+      */*/*) ns=${target%%/*}; rest=${target#*/}; name=${rest%%/*}; container=${rest#*/} ;;
+      */*) ns=${target%%/*}; name=${target#*/} ;;
+      *) name=$target ;;
+    esac
+    n=$(kubectl get pod -n "$ns" "$name" -o jsonpath='{.spec.nodeName}' 2>/dev/null || true)
+    if [ -n "$n" ]; then
+      pods="$name $n"
+    else
+      # Not a pod: a Deployment, StatefulSet or DaemonSet of that name?
+      for k in deploy sts ds; do
+        s=$(kubectl get "$k/$name" -n "$ns" \
+          -o go-template='{{range $k, $v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}' 2>/dev/null) || continue
+        [ -n "$s" ] && pods=$(list "${s%,}") && break
+      done
+      [ -n "$pods" ] || die "no pod or workload called $name in namespace $ns"
+    fi
+  fi
+fi
+
+# Targets for wits, and the nodes they are on (the first is asked).
+targets= nodes=
+if [ -n "$pods" ]; then
+  first=
+  while read -r p n; do
+    [ -n "$p" ] || continue
+    if [ -n "$container" ]; then t="$ns/$p/$container"; else t="$ns/$p"; fi
+    targets="$targets $t"
+    [ -n "$first" ] || first=$n
+    case " $nodes " in *" $n "*) ;; *) nodes="$nodes $n" ;; esac
+  done <<EOF
+$pods
+EOF
+  [ -n "$first" ] || die "the pods are not scheduled on a node"
+else
+  nodes=" $node"
+fi
 tty=; [ -t 1 ] && tty=-t
-exec kubectl exec -n "$NS" $tty "$agent" -- wits "$@"
+
+agent_on() { # node: the DaemonSet agent there, if any
+  kubectl get pod -n "$NS" -l app.kubernetes.io/name=wits --field-selector "spec.nodeName=$1" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
+}
+set -f # targets hold no globs, but keep them literal
+# shellcheck disable=SC2086
+set -- $targets "$@"
+set +f
+lead=${nodes# }; lead=${lead%% *}
+agent=$(agent_on "$lead")
+if [ -n "$agent" ]; then
+  exec kubectl exec -n "$NS" $tty "$agent" -- wits "$@"
+fi
+
+# No DaemonSet: a short-lived agent pod on every node involved.
+pns=${WITS_POD_NAMESPACE:-}
+if [ -z "$pns" ]; then
+  if kubectl get namespace "$NS" >/dev/null 2>&1; then pns=$NS; else pns=default; fi
+fi
+token=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
+run=wits-$(od -An -tx1 -N3 /dev/urandom | tr -d ' \n')
+made=
+cleanup() {
+  [ -z "$made" ] || kubectl delete pod -n "$pns" $made --wait=false --ignore-not-found >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+i=0
+for n in $nodes; do
+  i=$((i + 1))
+  name=$run-$i
+  echo "kubectl-wits: starting a privileged wits pod on node $n ($pns/$name)" >&2
+  kubectl create -n "$pns" -f - >/dev/null <<EOF || die "could not create a privileged pod in namespace $pns (a Pod Security policy may forbid it: set WITS_POD_NAMESPACE to one that allows privileged pods, or install deploy/kubernetes/wits.yaml)"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $name
+  labels:
+    app.kubernetes.io/name: wits-run
+    wits.run: $run
+spec:
+  nodeName: $n
+  hostPID: true
+  restartPolicy: Never
+  activeDeadlineSeconds: 600
+  automountServiceAccountToken: false
+  tolerations:
+    - operator: Exists
+  containers:
+    - name: wits
+      image: $IMAGE
+      args: ["agent", "--listen", "0.0.0.0:7477"]
+      env:
+        - name: NODE_NAME
+          value: "$n"
+        - name: WITS_TOKEN
+          value: "$token"
+        - name: WITS_HOST_ROOT
+          value: /host
+      readinessProbe:
+        tcpSocket:
+          port: 7477
+        periodSeconds: 1
+      securityContext:
+        privileged: true
+        readOnlyRootFilesystem: true
+      volumeMounts:
+        - name: varlog
+          mountPath: /host/var/log
+          readOnly: true
+        - name: tracefs
+          mountPath: /sys/kernel/tracing
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: varlog
+      hostPath:
+        path: /var/log
+    - name: tracefs
+      hostPath:
+        path: /sys/kernel/tracing
+    - name: tmp
+      emptyDir: {}
+EOF
+  made="$made $name"
+done
+kubectl wait -n "$pns" --for=condition=Ready pod -l "wits.run=$run" --timeout=180s >/dev/null \
+  || die "the wits pods did not become ready (kubectl get pods -n $pns -l wits.run=$run)"
+peers=
+for name in $made; do
+  [ "$name" = "$run-1" ] && continue
+  ip=$(kubectl get pod -n "$pns" "$name" -o jsonpath='{.status.podIP}')
+  peers="$peers${peers:+,}$ip"
+done
+if [ -n "$peers" ]; then
+  kubectl exec -n "$pns" $tty "$run-1" -- wits --peers "$peers" "$@"
+else
+  kubectl exec -n "$pns" $tty "$run-1" -- wits "$@"
+fi

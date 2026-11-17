@@ -12,7 +12,7 @@ use std::time::Duration;
 pub fn resolve(name: &str) -> Result<(i32, usize), String> {
     if name.contains('/') && !name.starts_with('/') {
         let v = crate::k8s::pod_pids(name)?;
-        return Ok((v[0].0, v.len() - 1));
+        return Ok((v[0], v.len() - 1));
     }
     let me = std::process::id() as i32;
     let mut exact = Vec::new();

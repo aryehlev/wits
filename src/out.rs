@@ -434,6 +434,18 @@ fn why(r: &Row) -> String {
     }
 }
 
+/// The terminal's width, or 200 when output is not a terminal.
+pub fn term_width() -> usize {
+    unsafe {
+        let mut ws: libc::winsize = std::mem::zeroed();
+        if libc::ioctl(1, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 40 {
+            ws.ws_col as usize
+        } else {
+            200
+        }
+    }
+}
+
 pub fn overview_text(rows: &[Row], window_ms: u64, st: &Style) -> String {
     let secs = window_ms as f64 / 1000.0;
     if rows.is_empty() {
@@ -447,14 +459,7 @@ pub fn overview_text(rows: &[Row], window_ms: u64, st: &Style) -> String {
     } else {
         format!("Processes waiting most right now ({secs:.1}s sample):")
     };
-    let width = unsafe {
-        let mut ws: libc::winsize = std::mem::zeroed();
-        if libc::ioctl(1, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 40 {
-            ws.ws_col as usize
-        } else {
-            200
-        }
-    };
+    let width = term_width();
     let mut out = vec![
         st.bold(&title),
         st.dim("    pid  name         waiting  why"),

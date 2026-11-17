@@ -28,7 +28,9 @@ running (use `wits run` to run it).
 ```sh
 wits --json <pid|name>               # one process: cause, object, blame, where in the code
 wits --json                          # the processes waiting most right now
-wits --json <namespace>/<pod>        # (Linux, on the node) a pod's busiest process
+wits --json <target> <target>...     # several at once, busiest first
+wits --json <namespace>/<pod>        # (Linux, on the node) each process of a pod
+wits --json <namespace>/<deployment> # (Linux) every replica of a Deployment, StatefulSet, DaemonSet or Job
 wits run -n 5 -o before.json -- <command...>   # run a command; where did its time go?
 wits diff --json before.json after.json        # did the change help?
 ```
@@ -42,8 +44,14 @@ wits diff --json before.json after.json        # did the change help?
 - If the answer has `"confidence":"low"` or a note about a limited view, rerun
   with `sudo` if you are allowed to. On Linux, `sudo` also adds on-CPU stacks
   (eBPF).
-- In Kubernetes, from outside the node: `kubectl wits <namespace>/<pod> --json`
-  (needs the wits DaemonSet; see the wits README).
+- In Kubernetes, from outside the node: `kubectl wits <namespace>/<pod> --json`,
+  or `kubectl wits -n <namespace> deploy/<name> --json` for every replica.
+  Without the wits DaemonSet it starts short-lived privileged pods on the
+  nodes involved; that needs permission to create privileged pods.
+- If the wits MCP server is connected (`wits mcp`), its tools do the same:
+  `wits_explain`, `wits_overview`, `wits_profile`, `wits_run`, `wits_diff`.
+- To show the user, add `--html <file>`: a web page with the answer and a
+  flame graph per cause (or `html_file` with the MCP tools).
 
 ## Reading the answer
 
@@ -83,6 +91,12 @@ Abridged:
 | `pod` | `namespace/pod/container` when the process runs in Kubernetes, else `null` |
 | `followed` | Parents wits skipped because they were only waiting for this child |
 | `confidence`, `notes` | How far to trust it, and why |
+
+Several processes (several targets, a pod with more than one process, or a
+workload) give `"kind":"group"` instead: `summary`, and `items`, busiest
+first, each with `node` and `answer` (the shape above). Start with
+`items[0].answer`; compare the others to see whether all replicas have the
+same problem or one is different.
 
 `wits profile <pid>` prints the same stacks as text, every cause with its call
 paths, for showing to the user. `wits profile --folded <pid>` gives folded
