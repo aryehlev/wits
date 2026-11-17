@@ -23,9 +23,15 @@ Call wits_explain on the slow process (a pid you started is best; a name, or on 
 node namespace/pod or namespace/<deployment> for every replica). Read cause, what, where and \
 blame: blame names the process, lock holder or remote host responsible; ask wits_explain about \
 a blamed process in turn until the answer is cpu, disk, memory, a cgroup limit, a remote host \
-or an idle process. To check a performance fix, call wits_run with repeat 5 before and after \
-the change (save each report) and wits_diff on the two files; report its verdict as it is: \
-'no clear change' is not a speedup. wits never changes or signals the processes it watches. \
+or an idle process. Before changing code, list candidate fixes and rank them by \
+score = 0.7 x gain + 0.3 x ease. gain (0-1) is the share of the measured time the change would \
+remove: at most the cause's share times the hot spot's share, less for a partial fix. ease (0-1) \
+is 1 for a flag, config value or one-line change, 0.7 for a small change in one function, 0.4 \
+for several functions or files or an API change, 0.1 for a redesign or new dependency. Make the \
+highest-scoring change first, one at a time, and tell the user the estimated scores. To check \
+each fix, call wits_run with repeat 5 before and after the change (save each report) and \
+wits_diff on the two files; report its verdict as it is: 'no clear change' is not a speedup, \
+and a change that buys no speed should be undone unless it is wanted for another reason. wits never changes or signals the processes it watches. \
 Without root it cannot see other users' processes, and on Linux shows no on-CPU stacks.";
 
 const TOOLS: &str = r#"[

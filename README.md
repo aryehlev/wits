@@ -33,6 +33,8 @@ wits diff --json before.json after.json        # did it help? verdict: faster | 
   `disk`, `memory`, a cgroup limit, a remote host or an idle process.
 - Report the `diff` verdict as it is: `no clear change` is not a speedup. Only
   repeat (`-n`) commands that are safe to run again.
+- Pick fixes by **0.7 × gain + 0.3 × ease** and make the highest-scoring one
+  first, one at a time (see [Choosing what to change](#choosing-what-to-change)).
 - MCP: `claude mcp add wits -- wits mcp` (any MCP client: command `wits`,
   argument `mcp`) gives you `wits_explain`, `wits_overview`, `wits_profile`,
   `wits_run` and `wits_diff`. Hosts that show pages (MCP Apps) also get the
@@ -241,6 +243,33 @@ faster: 515ms → 165ms (−68%), beyond run-to-run noise (the runs do not overl
 With overlapping runs it says `no clear change … within run-to-run noise`
 instead of claiming a win. With one run each it tells you to use `-n`.
 `wits run` works without root: everything it starts is its own descendant.
+
+### Choosing what to change
+
+The best fix is the one that removes the most time for the least work. Score
+each candidate:
+
+**score = 0.7 × gain + 0.3 × ease**
+
+- **gain** (0 to 1): the share of the measured time the change would remove.
+  wits gives the upper bound: the cause's share times the hot spot's share (a
+  disk cause at 96%, with 100% of it in `flush_log`, bounds a fix there at
+  0.96). A fix that removes half of a hot spot gets half of that.
+- **ease** (0 to 1): **1** a flag, a config value or one line; **0.7** a small
+  change inside one function; **0.4** several functions or files, or an API
+  change; **0.1** a redesign, a new dependency or a different architecture.
+
+| Candidate (disk 96%, all of it `fsync` in `flush_log`) | gain | ease | score |
+| --- | --- | --- | --- |
+| fsync once per batch of writes, not per write | 0.85 | 0.7 | **0.81** |
+| rewrite the storage layer | 0.95 | 0.1 | 0.70 |
+| move the file to a faster disk | 0.5 | 0.4 | 0.47 |
+
+Make the highest-scoring change first, one at a time, and measure each with
+`wits run` and `wits diff`. If the diff says `no clear change`, undo it: effort
+that buys no speed is not worth keeping. The skill, the MCP server and the
+page's "Ask your agent" prompt all tell coding agents to work this way and to
+show you their scores next to what wits measured.
 
 ## Kubernetes
 

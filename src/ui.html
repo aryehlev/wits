@@ -904,7 +904,7 @@ function explorer(M, opts = {}) {
   function fnPrompt(f, r, total) {
     const callers = [...r.callers.values()].sort((a, b) => b.us - a.us).slice(0, 3).map(x => x.f.name).join(", ");
     return `wits profiled ${opts.subject || "the program"}: ${f.func}${f.file ? ` (${fullWhere(f)})` : ""} accounts for ${pct(r.total / total)} of the ${[...st.causes].map(c => NAME[c]).join(" + ")} time (${pct(r.self / total)} in the function itself)` +
-      (callers ? `, called mostly from ${callers}` : "") + ". Read that code, explain why it is expensive, and propose a fix. Then measure the change with `wits run` and `wits diff`.";
+      (callers ? `, called mostly from ${callers}` : "") + ". Read that code and explain why it is expensive. " + RANK + " Then measure each change with `wits run` and `wits diff`.";
   }
   function legend() {
     const L = flameL();
@@ -1067,12 +1067,14 @@ function upstream(b, depth) {
     el("div", { class: "faint", style: "font-size:12px;margin-top:4px" }, `answered by the wits agent on node ${u.node}`),
     upstream(a.blame, depth + 1));
 }
+const RANK = "List the candidate fixes and rank them by score = 0.7 × gain + 0.3 × ease, where gain (0–1) is the share of the measured time the change would remove (at most the cause's share × the hot spot's share) and ease (0–1) is 1 for a flag, config value or one-line change, 0.7 for a small change in one function, 0.4 for several files or an API change, 0.1 for a redesign. Show the scores and make the highest-scoring change first, one at a time.";
 function answerPrompt(a) {
   const hot = (a.code?.causes || []).filter(c => c.cause !== "idle").flatMap(c => (c.hot || []).slice(0, 3).map(h =>
     `- ${c.cause}: ${pct(h.share)} in ${h.frame.func}${h.frame.file ? ` (${fullWhere(h.frame)})` : ""}${h.leaf ? `, inside ${h.leaf.func}` : ""}`)).slice(0, 6);
   return [`wits measured this: ${a.summary}.`, a.what && `What: ${a.what}`, a.where && `Where: ${a.where}`, a.blame?.text && `Blame: ${a.blame.text}`,
     hot.length ? "Hottest code:\n" + hot.join("\n") : "",
-    "Look at that code, explain what makes it slow, and propose a fix. Measure before and after with `wits run -n 5 -o before.json -- <command>` and `wits diff`, and report the verdict as it is."].filter(Boolean).join("\n");
+    "Look at that code and explain what makes it slow.", RANK,
+    "Measure each change before and after with `wits run -n 5 -o before.json -- <command>` and `wits diff`, report the verdict as it is, and undo a change that buys no clear speedup."].filter(Boolean).join("\n");
 }
 
 function answerView(a) {
@@ -1173,7 +1175,8 @@ function runPrompt(r, cmd) {
   const bd = r.breakdown || {};
   return [`wits ran \`${cmd}\`: it took ${msec(r.wall_ms)} (exit ${r.exit}). Time by cause: ${CAUSES.filter(c => c !== "idle" && bd[c] > 0.003).map(c => `${c} ${pct(bd[c])}`).join(", ")}.`,
     hot.length ? "Hottest code:\n" + hot.join("\n") : "",
-    "Make it faster where the time goes. Save this run with `wits run -n 5 -o before.json -- " + cmd + "`, change the code, run again with -o after.json, and report `wits diff before.json after.json` as it is."].filter(Boolean).join("\n");
+    "Make it faster where the time goes.", RANK,
+    "Save this run with `wits run -n 5 -o before.json -- " + cmd + "`, make the change, run again with -o after.json, and report `wits diff before.json after.json` as it is; undo a change that buys no clear speedup."].filter(Boolean).join("\n");
 }
 
 function diffView(d) {

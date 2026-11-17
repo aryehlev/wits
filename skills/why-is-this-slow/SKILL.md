@@ -50,6 +50,8 @@ wits diff --json before.json after.json        # did the change help?
   nodes involved; that needs permission to create privileged pods.
 - If the wits MCP server is connected (`wits mcp`), its tools do the same:
   `wits_explain`, `wits_overview`, `wits_profile`, `wits_run`, `wits_diff`.
+- Before fixing, rank the candidate fixes by 0.7 × gain + 0.3 × ease (see
+  "Choose the fix" below) and start with the highest.
 - To show the user, add `--html <file>`: a web page with the answer and a
   flame graph per cause (or `html_file` with the MCP tools).
 
@@ -124,6 +126,35 @@ If `code.notes` says a runtime's functions are hidden (Node, Python, Java,
 for example `node --perf-basic-prof` or `PYTHONPERFSUPPORT=1`. `wits run` sets
 the environment-variable ones itself. Restarting a running service with a
 switch is the user's decision.
+
+## Choose the fix: most gain for the least effort
+
+Before changing code, list the candidate fixes and score each one:
+
+**score = 0.7 × gain + 0.3 × ease**
+
+- **gain** (0 to 1): the share of the measured time the change would remove.
+  wits gives the upper bound: the cause's `share` times the hot spot's
+  `share` in `code.causes` (for a run report, `breakdown[cause]` times the hot
+  spot's `share`). A fix that removes half of a hot spot gets half of that.
+- **ease** (0 to 1): **1** a flag, a config value or one line; **0.7** a small
+  change inside one function; **0.4** several functions or files, or an API
+  change; **0.1** a redesign, a new dependency or a different architecture.
+
+Make the highest-scoring change first, one change at a time, and measure each
+one (below). Tell the user the scores you estimated next to what `wits diff`
+measured. If the diff says `no clear change`, undo the change unless it is
+wanted for another reason: effort that buys no speed is not worth keeping.
+
+For example, `disk` is 96% of the time and 100% of it is `fsync` in `flush_log`:
+
+| Candidate | gain | ease | score |
+| --- | --- | --- | --- |
+| fsync once per batch of writes, not per write | 0.85 | 0.7 | **0.81** |
+| rewrite the storage layer | 0.95 | 0.1 | 0.70 |
+| move the file to a faster disk | 0.5 | 0.4 | 0.47 |
+
+Start with the batch: almost all of the gain for a fraction of the work.
 
 ## Check a fix
 
