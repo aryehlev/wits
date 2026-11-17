@@ -65,8 +65,9 @@ USAGE
                              who is to blame, and where in the code)
   wits                       the processes waiting most right now
   wits profile <pid|name>    where the time goes, cause by cause, with call paths
-  wits run [-o out.json] -- <command...>
-                             run a command and explain where its time went
+  wits run [-n <count>] [-o out.json] -- <command...>
+                             run a command (count times) and explain where its
+                             time went; -o saves the report for diff
   wits diff <before.json> <after.json>
                              compare two runs: did the change help, and where?
   wits <namespace>/<pod>[/<container>]

@@ -4,7 +4,7 @@
 pkgname=wits-bin
 pkgver=@VERSION@
 pkgrel=1
-pkgdesc="Explain why a process is slow on your Linux system. No root, no eBPF."
+pkgdesc="Explain why a process is slow, and where in its code"
 arch=('x86_64' 'aarch64')
 url="https://github.com/aryehlev/wits"
 license=('MIT')

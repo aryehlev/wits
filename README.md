@@ -233,8 +233,9 @@ time and run state.
 Differences from Linux: the holder of a mutex is a best guess (macOS does not
 show lock owners without root) and says "probably"; which descriptor a
 blocked `read()` is on is inferred, with lower confidence when there are
-several candidates; `sample` takes a moment to attach, so processes that
-live under 60 ms in `wits run` have no stacks; and there is no agent.
+several candidates; `sample` takes a moment to attach, so in `wits run`
+processes that live under 60 ms have no stacks and runs shorter than about
+half a second undercount function time; and there is no agent.
 
 ## Use it from a coding agent
 
