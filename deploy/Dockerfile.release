@@ -1,0 +1,8 @@
+# The release image: the static binaries the release workflow built and
+# tested, unpacked into dist/<arch>/wits. To build from source instead, use
+# deploy/Dockerfile.
+FROM alpine:3.20
+ARG TARGETARCH
+COPY dist/${TARGETARCH}/wits /usr/local/bin/wits
+ENTRYPOINT ["/usr/local/bin/wits"]
+CMD ["agent"]
