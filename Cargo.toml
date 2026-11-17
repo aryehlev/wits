@@ -1,6 +1,6 @@
 [package]
 name = "wits"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2021"
 rust-version = "1.88"
 description = "Explain why a process is slow, and where in its code: Linux (procfs, eBPF) and macOS, any language, one binary."
