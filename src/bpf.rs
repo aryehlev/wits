@@ -10,10 +10,12 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 const BPF_MAP_CREATE: i32 = 0;
 const BPF_MAP_LOOKUP_ELEM: i32 = 1;
 const BPF_MAP_UPDATE_ELEM: i32 = 2;
+const BPF_MAP_DELETE_ELEM: i32 = 3;
 const BPF_MAP_GET_NEXT_KEY: i32 = 4;
 const BPF_PROG_LOAD: i32 = 5;
 
 pub const MAP_HASH: u32 = 1;
+pub const MAP_ARRAY: u32 = 2;
 pub const MAP_STACK_TRACE: u32 = 7;
 
 pub const PROG_TRACEPOINT: u32 = 5;
@@ -99,6 +101,11 @@ impl Map {
         assert_eq!(key.len(), self.key_size);
         assert_eq!(val.len(), self.value_size);
         self.elem(BPF_MAP_UPDATE_ELEM, key.as_ptr(), val.as_ptr() as *mut u8, 0)
+    }
+
+    pub fn delete(&self, key: &[u8]) -> io::Result<()> {
+        assert_eq!(key.len(), self.key_size);
+        self.elem(BPF_MAP_DELETE_ELEM, key.as_ptr(), std::ptr::null_mut(), 0)
     }
 
     /// All keys, read with GET_NEXT_KEY. Entries added meanwhile may be missed.

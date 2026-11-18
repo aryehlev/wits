@@ -10,23 +10,57 @@
 //!
 //! The kernel walks stacks by frame pointer; code built without them shows
 //! short stacks, and wits says so.
+//!
+//! The kernel's stack map is a hash table without chains: a stack whose
+//! slot another stack holds is lost. A long run has more distinct stacks
+//! than it has slots, so wits moves what was recorded out of the maps every
+//! moment, and frees the slots no one refers to any more.
 
 use crate::bpf::*;
+use std::collections::{HashMap, HashSet};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 
 const MAX_DEPTH: u32 = 127;
+/// How often the maps are emptied.
+const DRAIN: Duration = Duration::from_millis(500);
 
 pub struct Session {
     /// Which pids to profile; the fork program adds children to it.
     _targets: Map,
-    stacks: Map,
-    oncpu: Map,
-    start: Map,
-    offcpu: Map,
+    maps: Arc<Maps>,
+    /// Dropping it stops the thread that empties the maps.
+    _drain: mpsc::Sender<()>,
     _progs: Vec<Prog>,
     _events: Vec<PerfEvent>,
     pub freq: u64,
     pub started_ns: u64,
+}
+
+struct Maps {
+    stacks: Map,
+    oncpu: Map,
+    start: Map,
+    offcpu: Map,
+    /// One value: 1 while wits empties the maps. The programs then take no
+    /// stacks, so none refers to a slot being freed.
+    pause: Map,
     depth: usize,
+    moved: Mutex<Moved>,
+}
+
+/// (tgid, tid, user stack, kernel stack, lr)
+type OnKey = (i32, i32, Vec<u64>, Vec<u64>, u64);
+/// (tgid, tid, user stack, kernel stack, state, lr)
+type OffKey = (i32, i32, Vec<u64>, Vec<u64>, u32, u64);
+
+/// What was moved out of the maps, by stack.
+#[derive(Default)]
+struct Moved {
+    /// Samples on CPU.
+    on: HashMap<OnKey, u64>,
+    /// Time off CPU, ns.
+    off: HashMap<OffKey, u64>,
 }
 
 /// One stack and what it cost.
@@ -81,7 +115,7 @@ fn filter(a: &mut Asm, targets: &Map, out: &'static str, hit: &'static str) {
 }
 
 /// On-CPU sampler (perf_event program).
-fn prog_oncpu(targets: &Map, stacks: &Map, oncpu: &Map) -> Vec<Insn> {
+fn prog_oncpu(targets: &Map, stacks: &Map, oncpu: &Map, pause: &Map) -> Vec<Insn> {
     let mut a = Asm::new();
     a.mov(R6, R1)
         .call(FN_GET_CURRENT_PID_TGID)
@@ -92,6 +126,9 @@ fn prog_oncpu(targets: &Map, stacks: &Map, oncpu: &Map) -> Vec<Insn> {
         // the idle task
         .jmp_imm(Cond::Eq, R7, 0, "out");
     filter(&mut a, targets, "out", "hit");
+    // A sample skipped now and then is made up for: the stacks are scaled
+    // to the time measured on CPU.
+    paused(&mut a, pause, -40, "out");
     // key {tgid, tid, ustack, kstack, lr} at -24
     a.stx(Sz::W, R10, -24, R8)
         .stx(Sz::W, R10, -20, R7)
@@ -132,14 +169,28 @@ fn prog_oncpu(targets: &Map, stacks: &Map, oncpu: &Map) -> Vec<Insn> {
     a.finish()
 }
 
+/// Jump to `to` while wits empties the maps. Clobbers R0-R5 and stack slot
+/// `slot`.
+fn paused(a: &mut Asm, pause: &Map, slot: i16, to: &'static str) {
+    a.st(Sz::W, R10, slot, 0)
+        .ld_map(R1, pause)
+        .stack_ptr(R2, slot)
+        .call(FN_MAP_LOOKUP)
+        .jmp_imm(Cond::Eq, R0, 0, to)
+        .ldx(Sz::W, R1, R0, 0)
+        .jmp_imm(Cond::Ne, R1, 0, to);
+}
+
 /// Off-CPU accounting (sched_switch tracepoint program). With `lr`, also
 /// record the user link register from the task's saved registers (arm64,
 /// kernel 5.15+): the caller of a frameless system call wrapper.
+#[allow(clippy::too_many_arguments)]
 fn prog_offcpu(
     targets: &Map,
     stacks: &Map,
     start: &Map,
     offcpu: &Map,
+    pause: &Map,
     prev_state_off: i16,
     next_pid_off: i16,
     lr: bool,
@@ -161,9 +212,14 @@ fn prog_offcpu(
     // until the end of the session.
     a.ldx(Sz::W, R1, R6, prev_state_off)
         .jmp_imm(Cond::Set, R1, 0x30, "next");
-    // start value {ts u64, ustack, kstack, tgid, state, lr u64} at -40
+    // start value {ts u64, ustack, kstack, tgid, state, lr u64} at -40;
+    // a span that starts while wits empties the maps keeps its time but
+    // has no stack.
     a.stx(Sz::Dw, R10, -40, R9)
-        .mov(R1, R6)
+        .st(Sz::W, R10, -32, -1)
+        .st(Sz::W, R10, -28, -1);
+    paused(&mut a, pause, -96, "nostack");
+    a.mov(R1, R6)
         .ld_map(R2, stacks)
         .mov_imm(R3, F_USER_STACK)
         .call(FN_GET_STACKID)
@@ -173,6 +229,7 @@ fn prog_offcpu(
         .mov_imm(R3, 0)
         .call(FN_GET_STACKID)
         .stx(Sz::W, R10, -28, R0)
+        .label("nostack")
         .stx(Sz::W, R10, -24, R8)
         .ldx(Sz::W, R1, R6, prev_state_off)
         .stx(Sz::W, R10, -20, R1)
@@ -317,15 +374,16 @@ impl Session {
         let oncpu = Map::create(MAP_HASH, 24, 8, 65536, "wits_oncpu").map_err(e("map"))?;
         let start = Map::create(MAP_HASH, 4, 32, 65536, "wits_start").map_err(e("map"))?;
         let offcpu = Map::create(MAP_HASH, 32, 16, 65536, "wits_offcpu").map_err(e("map"))?;
+        let pause = Map::create(MAP_ARRAY, 4, 4, 1, "wits_pause").map_err(e("map"))?;
         pids.iter()
             .try_for_each(|pid| targets.update(&(*pid as u32).to_ne_bytes(), &1u32.to_ne_bytes()))
             .map_err(e("map"))?;
 
         let (sw_id, sw_off) = tracepoint("sched", "sched_switch", &["prev_state", "next_pid"])
             .ok_or("eBPF: cannot read the sched_switch tracepoint format (is tracefs available?)")?;
-        let p_on = Prog::load(PROG_PERF_EVENT, &prog_oncpu(&targets, &stacks, &oncpu), "wits_oncpu")
+        let p_on = Prog::load(PROG_PERF_EVENT, &prog_oncpu(&targets, &stacks, &oncpu, &pause), "wits_oncpu")
             .map_err(|m| format!("eBPF load: {m}"))?;
-        let off = |lr| prog_offcpu(&targets, &stacks, &start, &offcpu, sw_off[0], sw_off[1], lr);
+        let off = |lr| prog_offcpu(&targets, &stacks, &start, &offcpu, &pause, sw_off[0], sw_off[1], lr);
         let p_off = if cfg!(target_arch = "aarch64") {
             Prog::load(PROG_TRACEPOINT, &off(true), "wits_offcpu")
                 .or_else(|_| Prog::load(PROG_TRACEPOINT, &off(false), "wits_offcpu"))
@@ -365,21 +423,86 @@ impl Session {
         }
         let mut progs = vec![p_on, p_off];
         progs.extend(fork.map(|f| f.1));
-        Ok(Session {
-            _targets: targets,
+        let maps = Arc::new(Maps {
             stacks,
             oncpu,
             start,
             offcpu,
+            pause,
+            depth: depth as usize,
+            moved: Mutex::new(Moved::default()),
+        });
+        let (tx, rx) = mpsc::channel::<()>();
+        let m = Arc::clone(&maps);
+        // Without the thread the maps are emptied once, at the end.
+        let _ = std::thread::Builder::new().name("wits-ebpf".into()).spawn(move || {
+            while let Err(mpsc::RecvTimeoutError::Timeout) = rx.recv_timeout(DRAIN) {
+                m.drain();
+            }
+        });
+        Ok(Session {
+            _targets: targets,
+            maps,
+            _drain: tx,
             _progs: progs,
             _events: events,
             freq,
             started_ns,
-            depth: depth as usize,
         })
     }
 
-    fn stack(&self, id: i32, cache: &mut std::collections::HashMap<i32, Vec<u64>>) -> Vec<u64> {
+    /// Everything recorded so far. Threads still off CPU are counted up to
+    /// now, from when they left (or from the start of the session).
+    pub fn collect(&self) -> Vec<RawStack> {
+        let m = &self.maps;
+        m.drain();
+        let mut out = Vec::new();
+        {
+            let moved = m.moved.lock().unwrap_or_else(|e| e.into_inner());
+            for ((tgid, tid, user, kernel, lr), n) in &moved.on {
+                out.push(RawStack {
+                    tgid: *tgid,
+                    tid: *tid,
+                    user: user.clone(),
+                    kernel: kernel.clone(),
+                    off_state: None,
+                    ns: n * 1_000_000_000 / self.freq.max(1),
+                    lr: *lr,
+                });
+            }
+            for ((tgid, tid, user, kernel, state, lr), ns) in &moved.off {
+                out.push(RawStack {
+                    tgid: *tgid,
+                    tid: *tid,
+                    user: user.clone(),
+                    kernel: kernel.clone(),
+                    off_state: Some(*state),
+                    ns: *ns,
+                    lr: *lr,
+                });
+            }
+        }
+        // The slots these refer to were kept.
+        let mut cache = HashMap::new();
+        let now = monotonic_ns();
+        for (k, v) in m.start.entries() {
+            let ts = u64_at(&v, 0).max(self.started_ns);
+            out.push(RawStack {
+                tgid: i32_at(&v, 16),
+                tid: i32_at(&k, 0),
+                user: m.stack(i32_at(&v, 8), &mut cache),
+                kernel: m.stack(i32_at(&v, 12), &mut cache),
+                off_state: Some(i32_at(&v, 20) as u32),
+                ns: now.saturating_sub(ts),
+                lr: u64_at(&v, 24),
+            });
+        }
+        out
+    }
+}
+
+impl Maps {
+    fn stack(&self, id: i32, cache: &mut HashMap<i32, Vec<u64>>) -> Vec<u64> {
         if id < 0 {
             return Vec::new();
         }
@@ -399,50 +522,49 @@ impl Session {
             .clone()
     }
 
-    /// Everything recorded so far. Threads still off CPU are counted up to
-    /// now, from when they left (or from the start of the session).
-    pub fn collect(&self) -> Vec<RawStack> {
-        let mut cache = std::collections::HashMap::new();
-        let mut out = Vec::new();
+    /// Move what the programs recorded into `moved`, and free the stack
+    /// slots nothing refers to any more.
+    fn drain(&self) {
+        let mut moved = self.moved.lock().unwrap_or_else(|e| e.into_inner());
+        let (key, on, off) = (0u32.to_ne_bytes(), 1u32.to_ne_bytes(), 0u32.to_ne_bytes());
+        if self.pause.update(&key, &on).is_err() {
+            return;
+        }
+        // A program past the check finishes within microseconds.
+        std::thread::sleep(Duration::from_millis(1));
+        // Threads off CPU will end their spans with these stacks.
+        let keep: HashSet<i32> = self
+            .start
+            .entries()
+            .iter()
+            .flat_map(|(_, v)| [i32_at(v, 8), i32_at(v, 12)])
+            .collect();
+        let mut cache = HashMap::new();
         for (k, v) in self.oncpu.entries() {
-            let (us, ks) = (i32_at(&k, 8), i32_at(&k, 12));
-            out.push(RawStack {
-                tgid: i32_at(&k, 0),
-                tid: i32_at(&k, 4),
-                user: self.stack(us, &mut cache),
-                kernel: self.stack(ks, &mut cache),
-                off_state: None,
-                ns: u64_at(&v, 0) * 1_000_000_000 / self.freq.max(1),
-                lr: u64_at(&k, 16),
-            });
+            let _ = self.oncpu.delete(&k);
+            let user = self.stack(i32_at(&k, 8), &mut cache);
+            let kernel = self.stack(i32_at(&k, 12), &mut cache);
+            *moved
+                .on
+                .entry((i32_at(&k, 0), i32_at(&k, 4), user, kernel, u64_at(&k, 16)))
+                .or_default() += u64_at(&v, 0);
         }
         for (k, v) in self.offcpu.entries() {
-            let (us, ks) = (i32_at(&k, 8), i32_at(&k, 12));
-            out.push(RawStack {
-                tgid: i32_at(&k, 0),
-                tid: i32_at(&k, 4),
-                user: self.stack(us, &mut cache),
-                kernel: self.stack(ks, &mut cache),
-                off_state: Some(i32_at(&k, 16) as u32),
-                ns: u64_at(&v, 0),
-                lr: u64_at(&k, 24),
-            });
+            let _ = self.offcpu.delete(&k);
+            let user = self.stack(i32_at(&k, 8), &mut cache);
+            let kernel = self.stack(i32_at(&k, 12), &mut cache);
+            let state = i32_at(&k, 16) as u32;
+            *moved
+                .off
+                .entry((i32_at(&k, 0), i32_at(&k, 4), user, kernel, state, u64_at(&k, 24)))
+                .or_default() += u64_at(&v, 0);
         }
-        let now = monotonic_ns();
-        for (k, v) in self.start.entries() {
-            let ts = u64_at(&v, 0).max(self.started_ns);
-            let (us, ks) = (i32_at(&v, 8), i32_at(&v, 12));
-            out.push(RawStack {
-                tgid: i32_at(&v, 16),
-                tid: i32_at(&k, 0),
-                user: self.stack(us, &mut cache),
-                kernel: self.stack(ks, &mut cache),
-                off_state: Some(i32_at(&v, 20) as u32),
-                ns: now.saturating_sub(ts),
-                lr: u64_at(&v, 24),
-            });
+        for k in self.stacks.keys() {
+            if !keep.contains(&i32_at(&k, 0)) {
+                let _ = self.stacks.delete(&k);
+            }
         }
-        out
+        let _ = self.pause.update(&key, &off);
     }
 }
 
@@ -456,9 +578,9 @@ mod tests {
     fn programs_assemble() {
         // Map fds are only embedded, never used, when assembling.
         let fake = || Map::create(MAP_HASH, 4, 4, 1, "t");
-        if let (Ok(t), Ok(s), Ok(o), Ok(st), Ok(off)) = (fake(), fake(), fake(), fake(), fake()) {
-            assert!(prog_oncpu(&t, &s, &o).len() > 20);
-            assert!(prog_offcpu(&t, &s, &st, &off, 32, 56, true).len() > 40);
+        if let (Ok(t), Ok(s), Ok(o), Ok(st), Ok(off), Ok(p)) = (fake(), fake(), fake(), fake(), fake(), fake()) {
+            assert!(prog_oncpu(&t, &s, &o, &p).len() > 20);
+            assert!(prog_offcpu(&t, &s, &st, &off, &p, 32, 56, true).len() > 40);
             assert!(prog_fork(&t, 44).len() > 10);
         }
     }
@@ -477,11 +599,12 @@ mod load_tests {
         let o = Map::create(MAP_HASH, 24, 8, 16, "o").unwrap();
         let st = Map::create(MAP_HASH, 4, 32, 16, "st").unwrap();
         let off = Map::create(MAP_HASH, 32, 16, 16, "off").unwrap();
-        Prog::load(PROG_PERF_EVENT, &prog_oncpu(&t, &s, &o), "on").unwrap();
-        Prog::load(PROG_TRACEPOINT, &prog_offcpu(&t, &s, &st, &off, 32, 56, false), "off").unwrap();
+        let p = Map::create(MAP_ARRAY, 4, 4, 1, "p").unwrap();
+        Prog::load(PROG_PERF_EVENT, &prog_oncpu(&t, &s, &o, &p), "on").unwrap();
+        Prog::load(PROG_TRACEPOINT, &prog_offcpu(&t, &s, &st, &off, &p, 32, 56, false), "off").unwrap();
         Prog::load(PROG_TRACEPOINT, &prog_fork(&t, 44), "fork").unwrap();
         if cfg!(target_arch = "aarch64") {
-            Prog::load(PROG_TRACEPOINT, &prog_offcpu(&t, &s, &st, &off, 32, 56, true), "off_lr").unwrap();
+            Prog::load(PROG_TRACEPOINT, &prog_offcpu(&t, &s, &st, &off, &p, 32, 56, true), "off_lr").unwrap();
         }
     }
 }
