@@ -106,7 +106,7 @@ wits mcp                     # an MCP server for coding agents
 | `--no-follow` | do not descend into the child a process is waiting for |
 | `--no-stacks` | do not collect stacks (no `where`) |
 | `--folded` | with `profile`: folded stacks, for `flamegraph.pl`, inferno or speedscope |
-| `--html <file>` | also write the answer as a web page, with flame graphs by cause |
+| `--html <file>` | also write the answer as a web page to explore: the dive, flame graphs by cause, top functions |
 | `-o <file>` | with `run`: save the report for `diff` |
 | `-n <count>` | with `run`: run the command that many times |
 | `--peers <list>` | wits agents on other machines to follow blame to |
@@ -181,13 +181,20 @@ Languages:
 ### See it
 
 Add `--html <file>` to any command and wits also writes its answer as one
-self-contained web page you can click through:
+self-contained web page you can explore:
 
 ```sh
 sudo wits run --html run.html -- ./server --selftest
 ```
 
-![the page wits writes: the answer, where to start in your code, and an explorer of the time](demo/profile.png)
+Here it is for [black](https://github.com/psf/black) checking Django's
+source (`sudo env PYTHONPERFSUPPORT=1 wits run --html black.html -- black
+--check --workers 1 django`):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="demo/page-dark.png">
+  <img alt="the page wits writes for black checking Django: took 114 s, mostly on CPU; start with Parser._addtoken and tokenize; below, the dive has followed the heat down to Parser._addtoken" src="demo/page-light.png">
+</picture>
 
 - **The answer first.** What the time went to, as a ring you can click, and
   in plain words what it means and what to try.
@@ -198,17 +205,17 @@ sudo wits run --html run.html -- ./server --selftest
 - **Dive.** The call tree as an ocean: the program starts at the surface,
   every call is a step deeper, and more time is wider. Your functions glow,
   and time bubbles up from where it is spent, fast for CPU and slowly for
-  waits. **Follow the heat** swims down to where wits says to start; drag to
-  swim, scroll to dive, click a function to dive into it, and the sonar shows
-  where you are.
+  waits. **Follow the heat** swims down to where wits says to start (the
+  first time you see it, it does so by itself); drag to swim, scroll to dive,
+  click a function to dive into it, and the sonar shows where you are.
 
-  ![the dive: the call tree as an ocean, following the heat down to the hottest function](demo/dive.png)
+  ![the dive following the heat down black's parser, from format_file_in_place to Parser._addtoken, where 12% of the time is spent](demo/dive.webp)
 
 - **Explore.** The same time as an animated flame graph: click to zoom, hover
   to light up a function everywhere it appears, search, and **Only my code**
-  to fold away the runtime between your functions. **Top functions** ranks them, **By
-  package** shows whose code the time is in, and clicking any function shows
-  who calls it, what it calls and its hot lines.
+  to fold away the runtime between your functions. **Top functions** ranks
+  them, **By package** shows whose code the time is in, and clicking any
+  function shows who calls it, what it calls and its hot lines.
 - **Ask your agent.** One button writes a prompt with the answer and the
   hottest code for your coding agent.
 

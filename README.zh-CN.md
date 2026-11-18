@@ -100,7 +100,7 @@ wits mcp                     # 给编程智能体用的 MCP 服务器
 | `--no-follow` | 不要跟进到进程正在等待的子进程 |
 | `--no-stacks` | 不收集调用栈（没有 `where`） |
 | `--folded` | 与 `profile` 一起用：输出折叠栈，供 `flamegraph.pl`、inferno 或 speedscope 使用 |
-| `--html <文件>` | 同时把答案写成一个网页，按原因分别给出火焰图 |
+| `--html <文件>` | 同时把答案写成一个可以浏览的网页：潜水视图、按原因分别给出的火焰图、热点函数 |
 | `-o <文件>` | 与 `run` 一起用：保存报告，供 `diff` 使用 |
 | `-n <次数>` | 与 `run` 一起用：把命令运行这么多次 |
 | `--peers <列表>` | 其他机器上的 wits agent，用来把归因跟进过去 |
@@ -176,7 +176,13 @@ libbpf，什么都不用装。
 sudo wits run --html run.html -- ./server --selftest
 ```
 
-![wits 生成的页面：答案、从你代码的哪里入手，以及时间的浏览器](demo/profile.png)
+下面是 [black](https://github.com/psf/black) 检查 Django 源码时的页面（`sudo env PYTHONPERFSUPPORT=1 wits run
+--html black.html -- black --check --workers 1 django`）：
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="demo/page-dark.png">
+  <img alt="wits 为 black 检查 Django 生成的页面：用时 114 秒，主要在 CPU 上；从 Parser._addtoken 和 tokenize 入手；下面的潜水视图已经跟着热度潜到了 Parser._addtoken" src="demo/page-light.png">
+</picture>
 
 - **答案在最前面。** 时间花在哪些原因上（可以点击的圆环），用平实的话说明它意味着什么、可以试什么。
 - **从这里入手。** 你代码里最热的函数，带文件和行号（点击复制），以及它们把时间花在了什么调用里。
@@ -184,9 +190,9 @@ sudo wits run --html run.html -- ./server --selftest
   Java、Ruby 和 .NET。
 - **潜水。** 把调用树画成一片海：程序从海面开始，每多一层调用就更深一层，花的时间越多越宽。
   你的函数会发光，时间从花掉它的地方冒出气泡：CPU 冒得快，等待冒得慢。**跟着热度走**（Follow the
-  heat）会一路游到 wits 建议你入手的地方；拖动来游，滚动来下潜，点击函数潜入其中，声呐小地图显示你在哪里。
+  heat）会一路游到 wits 建议你入手的地方（第一次看到它时会自动开始）；拖动来游，滚动来下潜，点击函数潜入其中，声呐小地图显示你在哪里。
 
-  ![潜水视图：把调用树画成一片海，跟着热度一路潜到最热的函数](demo/dive.png)
+  ![潜水视图跟着热度沿 black 的解析器一路往下，从 format_file_in_place 潜到 Parser._addtoken，12% 的时间花在那里](demo/dive.webp)
 
 - **浏览。** 同样的时间也可以看成带动画的火焰图：点击放大，悬停时高亮同一个函数出现的所有位置，可以搜索；
   **只看我的代码** 会把你的函数之间的运行时栈帧折叠起来。**热点函数** 给函数排名，**按包** 显示时间花在
