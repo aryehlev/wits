@@ -32,6 +32,7 @@ wits --json                   # don't know which process? the ones waiting most 
 wits run -n 5 -o before.json -- <command...>   # before a change; again with -o after.json
 wits diff --json before.json after.json        # did it help? verdict: faster | slower | no clear change
 wits guide <language>         # what usually fixes it in python, node, go, rust, jvm, dotnet, ruby, beam, c
+wits on <where> --json <pid|name>   # the same on another machine: [user@]host, gcp:<vm>, aws:<vm>, azure:<group>/<vm>
 ```
 
 - Read `summary`, `cause`, `what`, `where` and `blame`. When `blame.kind`
@@ -48,9 +49,13 @@ wits guide <language>         # what usually fixes it in python, node, go, rust,
   first, one at a time (see [Choosing what to change](#choosing-what-to-change)).
 - MCP: `claude mcp add wits -- wits mcp` (any MCP client: command `wits`,
   argument `mcp`) gives you `wits_explain`, `wits_overview`, `wits_profile`,
-  `wits_run`, `wits_diff` and `wits_guide`. Hosts that show pages (MCP Apps) also get the
+  `wits_run`, `wits_diff`, `wits_remote` and `wits_guide`. Hosts that show pages (MCP Apps) also get the
   [profile view](#see-it). For skills, copy
   [`skills/why-is-this-slow`](skills/why-is-this-slow/SKILL.md).
+- Another machine: `wits on <where> --json <pid|name>` runs wits there over
+  ssh, or on a cloud VM by its name, and gives the same answer; `--sudo` to
+  see other users' processes (see
+  [On another machine](#on-another-machine-in-any-cloud)).
 - Kubernetes: `wits --json <namespace>/<pod>` or `<namespace>/<deployment>`
   on a node, or `kubectl wits -n <namespace> deploy/<name> --json` from
   anywhere (see [Kubernetes](#kubernetes)).
@@ -94,7 +99,8 @@ yay -S wits-bin                    # Arch (AUR)
 Or download the binary from
 [Releases](https://github.com/aryehlev/wits/releases) and put it on your
 `PATH`: static for Linux on x86_64 and aarch64, and for macOS on Apple silicon
-and Intel. For Kubernetes, see [below](#kubernetes).
+and Intel. For Kubernetes, see [below](#kubernetes). Servers need no install:
+[`wits on`](#on-another-machine-in-any-cloud) asks them from here.
 
 ## Use
 
@@ -108,6 +114,7 @@ wits diff before.json after.json   # did my change help?
 wits guide [<language>]      # what usually makes it slow in that language, and what fixes it
 wits <namespace>/<pod>       # a pod: each of its processes (Linux)
 wits <namespace>/<deployment>      # every replica, busiest first (Linux)
+wits on <where> <any of the above> # on another machine: [user@]host, gcp:, aws:, azure:
 wits mcp                     # an MCP server for coding agents
 ```
 
@@ -338,6 +345,56 @@ that buys no speed is not worth keeping. The skill, the MCP server and the
 page's "Ask your agent" prompt all tell coding agents to work this way and to
 show you their scores next to what wits measured.
 
+## On another machine, in any cloud
+
+```sh
+wits on deploy@web-1 api                  # any machine you can ssh to, as ~/.ssh/config has it
+wits on gcp:web-1 api                     # a Google Cloud VM by name, through gcloud
+wits on aws:web-1 --json api              # an EC2 instance by Name tag or id, through Session Manager
+wits on azure:shop-rg/web-1 profile api   # an Azure VM, through az ssh
+wits on --sudo gcp:web-1 --html pg.html postgres     # as root there; the page is written here
+wits on web-1 run -n 5 -o before.json -- ./bench     # run and measure there; the report comes back
+```
+
+`wits on <where>` runs wits on that machine and brings the answer back. What
+follows `<where>` is what you would type there, and `--json`, `--html` and
+`-o` work as they do locally: the files are written on your machine. Nothing
+has to be installed or listening on the other machine, and no port has to be
+opened. The first time, wits copies its binary for that machine's system and
+processor (a few megabytes) into `~/.cache/wits` there and uses it from then on;
+`--rm` removes it afterwards. It changes nothing else there.
+
+| `<where>` | Reached through | You need |
+| --- | --- | --- |
+| `[user@]host[:port]` | `ssh`, with your keys and `~/.ssh/config`: bastions, `ProxyJump`, Tailscale, Teleport, any cloud or none | to be able to `ssh` there |
+| `gcp:[user@][project/][zone/]instance` | `gcloud compute ssh`, which finds the VM, manages the key and tunnels through IAP when the VM has no public address | `gcloud`, logged in |
+| `aws:[user@][region/]<id or Name tag>` | `ssh` through Session Manager (`aws ssm start-session`): no public address or open port | the AWS CLI with the Session Manager plugin, and a key the instance accepts |
+| `azure:[user@]<resource group>/<vm>` | `az ssh vm`: your Entra ID login, or `user@` for a local user | `az` with its `ssh` extension, logged in |
+| `--via '<command>'` (instead of `<where>`) | any command that runs the shell command line given as its last argument on the machine | for example `--via 'ssh -J bastion -p 2222 web-1'`, `--via 'docker exec -i web sh -c'`, `--via 'tsh ssh web-1'` |
+
+- **`--sudo`** runs wits there as root (`sudo -n`, so sudo must not ask for a
+  password; the default user of cloud images has that). Without it wits sees
+  the processes of the user you log in as, and most server processes belong
+  to another user. On Linux, root also adds eBPF stacks.
+- **The binary** comes from this machine, so the other one needs no internet
+  access. When the two are the same kind (and this wits is a static build),
+  wits sends itself. Otherwise it downloads the release for that system once,
+  checks it against its checksum and keeps it in `~/.cache/wits` here.
+  `WITS_REMOTE_BINARY=<file>` sends a binary of yours instead.
+- **Following blame.** When the answer blames a host you can reach
+  (`blame.kind` `remote`, with its address), ask there next:
+  `wits on <that host> <the server's name>`.
+- **`run`** runs the command on that machine, in the login directory. Ctrl-C
+  stops wits here; a command started there may keep running, because ssh
+  without a terminal does not pass the interrupt on.
+- With no terminal to ask on (in a script, or from the MCP server), ssh is
+  told not to ask for a password or about a new host key: it fails and says
+  why.
+- wits has to run on the machine, so services you cannot log in to (Lambda,
+  Cloud Run, a managed database) are out of reach: they show as the `peer`
+  that a process of yours waits for, with the address. For Kubernetes pods
+  use [`kubectl wits`](#from-your-laptop-kubectl-wits).
+
 ## Kubernetes
 
 wits names the pod and container of every process it reports, from the
@@ -468,12 +525,16 @@ example:
 | `wits_profile` | one process, with every stack by cause, for a flame graph |
 | `wits_run` | run a command (`command`, `repeat`, `save`, `cwd`) and report where its time went |
 | `wits_diff` | compare two saved runs: faster, slower or no clear change |
+| `wits_remote` | explain, overview or profile on another machine (`on`: `[user@]host`, `gcp:…`, `aws:…`, `azure:…`; `sudo`) |
 | `wits_guide` | what usually makes a program in one language slow and what usually fixes it (`topic`: a language, or `general`) |
 
-The first five run `wits` with `--json` and return that answer, as text and
+All but the last run `wits` with `--json` and return that answer, as text and
 as structured content, so each does exactly what the command does. Each can
 also write the [page](#see-it) to a file (`html_file`); hosts that support
-MCP Apps show the page with the result. `wits_guide` returns a
+MCP Apps show the page with the result. `wits_remote` is
+[`wits on`](#on-another-machine-in-any-cloud): it is marked as reaching
+outside this machine, so a host can ask you before it is used, and it never
+asks for a password. `wits_guide` returns a
 [guide](#what-kind-of-work-it-is) as text. The server tells the agent how to
 use them: measure first, follow the blame, read the hints and the guide for
 the program's language, rank fixes by

@@ -4,8 +4,9 @@
 //! text and as structured content, so the tools do exactly what the
 //! commands do. Hosts that show tool results as pages (MCP Apps) get the
 //! page in ui.rs, with flame graphs; others get the JSON, and any tool can
-//! also write the page to a file (`html_file`). `wits_guide` returns a
-//! guide (guide.rs) as it is.
+//! also write the page to a file (`html_file`). `wits_remote` asks on
+//! another machine (on.rs), and `wits_guide` returns a guide (guide.rs) as
+//! it is.
 
 use crate::json::{self, Value};
 use crate::out::esc;
@@ -24,7 +25,9 @@ Call wits_explain on the slow process (a pid you started is best; a name, or on 
 node namespace/pod or namespace/<deployment> for every replica). Read cause, what, where and \
 blame: blame names the process, lock holder or remote host responsible; ask wits_explain about \
 a blamed process in turn until the answer is cpu, disk, memory, a cgroup limit, a remote host \
-or an idle process. code.lang names the program's language, and code.hints lists the costs wits \
+or an idle process. When the slow process is on another machine, or blame names a host you can \
+log in to, call wits_remote: it runs wits there over ssh, or on a cloud VM by its name (gcp:, \
+aws:, azure:), and gives the same answer. code.lang names the program's language, and code.hints lists the costs wits \
 knows by name, summed over every stack (allocation and garbage collection, the interpreter's own \
 loop, regex, JSON, a lock, a debug build...): each has the share of that cause's time, what it \
 means and what usually fixes it. Before choosing a fix, call wits_guide with that language (and \
@@ -93,6 +96,21 @@ const TOOLS: &str = r#"[
     "html_file":{"type":"string","description":"Also write the comparison as a web page to this path."}},
    "required":["before","after"]},
   "annotations":{"readOnlyHint":true,"openWorldHint":false},
+  "_meta":{"ui":{"resourceUri":"ui://wits/view.html"}}},
+ {"name":"wits_remote",
+  "title":"Ask on another machine",
+  "description":"Like wits_explain, wits_overview or wits_profile, on another machine: a server reached over ssh, or a cloud VM found by its name and reached with that cloud's own CLI and the user's login (Google Cloud, AWS, Azure). Use it when the slow process is not on this machine, or to follow blame to a remote host. The first time, it copies the wits binary (a few MB) into ~/.cache/wits on that machine; it changes nothing else there and needs nothing installed or listening. It never asks for a password: it fails if the login needs one. For Kubernetes pods use kubectl wits.",
+  "inputSchema":{"type":"object","properties":{
+    "on":{"type":"string","description":"The machine: [user@]host[:port] over ssh (names from ~/.ssh/config work); gcp:[user@][project/][zone/]instance; aws:[user@][region/]<instance id or Name tag> (through Session Manager); azure:[user@]<resource group>/<vm>."},
+    "ask":{"type":"string","enum":["explain","overview","profile"],"description":"explain (default): why target is slow. overview: what is waiting most on that machine, when you do not know which process. profile: explain with every stack."},
+    "target":{"type":"string","description":"For explain and profile: a pid or a process name on that machine."},
+    "targets":{"type":"array","items":{"type":"string"},"description":"For explain: several targets at once, instead of target."},
+    "sudo":{"type":"boolean","description":"Run wits there as root with sudo -n (default false). Root sees other users' processes and, on Linux, where on-CPU time goes; most server processes belong to another user. Fails if sudo needs a password."},
+    "seconds":{"type":"number","minimum":0.1,"maximum":60,"description":"How long to watch (default 2)."},
+    "stacks":{"type":"boolean","description":"Collect stacks for the 'where' field (default true)."},
+    "html_file":{"type":"string","description":"Also write the answer as a web page to this path, on this machine."}},
+   "required":["on"]},
+  "annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true},
   "_meta":{"ui":{"resourceUri":"ui://wits/view.html"}}},
  {"name":"wits_guide",
   "title":"What usually fixes it",
@@ -256,6 +274,27 @@ fn plan(name: &str, a: &Value, n: u64) -> Result<Plan, String> {
             args.extend(cmd);
             report = Some((file, keep));
             cwd = a.get("cwd").str().map(str::to_string);
+        }
+        "wits_remote" => {
+            // `wits on` reads the name itself; here only keep it from being
+            // read as an option.
+            let on = a.get("on").str().unwrap_or("").trim();
+            if on.is_empty() || on.starts_with('-') {
+                return Err("give 'on': the machine, as [user@]host, gcp:instance, aws:instance or azure:group/vm".into());
+            }
+            let ask = match a.get("ask").str().unwrap_or("explain") {
+                "explain" => "wits_explain",
+                "overview" => "wits_overview",
+                "profile" => "wits_profile",
+                x => return Err(format!("'{x}' is not something to ask there: explain, overview or profile")),
+            };
+            let there = plan(ask, a, n)?;
+            args.push("on".into());
+            if a.get("sudo").bool() == Some(true) {
+                args.push("--sudo".into());
+            }
+            args.push(on.into());
+            args.extend(there.args);
         }
         "wits_diff" => {
             let (Some(b), Some(f)) = (a.get("before").str(), a.get("after").str()) else {
@@ -423,7 +462,7 @@ mod tests {
     fn tools_are_valid_json() {
         let t = json::parse(TOOLS).unwrap();
         let names: Vec<&str> = t.arr().iter().filter_map(|x| x.get("name").str()).collect();
-        assert_eq!(names, ["wits_explain", "wits_overview", "wits_profile", "wits_run", "wits_diff", "wits_guide"]);
+        assert_eq!(names, ["wits_explain", "wits_overview", "wits_profile", "wits_run", "wits_diff", "wits_remote", "wits_guide"]);
         for x in t.arr() {
             // Every tool that reports on processes has the page; a guide is text.
             let page = x.get("_meta").get("ui").get("resourceUri").str();
@@ -481,5 +520,15 @@ mod tests {
         assert_eq!(p.args, ["run", "-n", "5", "-o", "b.json", "--", "cargo", "test"]);
         assert!(plan("wits_explain", &json::parse(r#"{"target":"--help"}"#).unwrap(), 1).is_err());
         assert!(plan("wits_profile", &json::parse("{}").unwrap(), 1).is_err());
+
+        // On another machine: the same command line, after where.
+        let a = json::parse(r#"{"on":"gcp:web-1","target":"api","sudo":true,"seconds":5,"html_file":"p.html"}"#).unwrap();
+        let p = plan("wits_remote", &a, 1).unwrap();
+        assert_eq!(p.args, ["on", "--sudo", "gcp:web-1", "--json", "-t", "5", "--html", "p.html", "api"]);
+        let a = json::parse(r#"{"on":"deploy@db-1","ask":"overview"}"#).unwrap();
+        assert_eq!(plan("wits_remote", &a, 1).unwrap().args, ["on", "deploy@db-1", "--json"]);
+        for bad in [r#"{"target":"api"}"#, r#"{"on":"-oProxyCommand=x","target":"api"}"#, r#"{"on":"web-1"}"#, r#"{"on":"web-1","ask":"run"}"#] {
+            assert!(plan("wits_remote", &json::parse(bad).unwrap(), 1).is_err(), "{bad}");
+        }
     }
 }

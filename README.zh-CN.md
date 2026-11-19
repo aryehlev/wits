@@ -28,6 +28,7 @@ wits --json                    # 不知道是哪个进程？列出现在等待�
 wits run -n 5 -o before.json -- <命令...>   # 改动之前；改动之后用 -o after.json 再跑一次
 wits diff --json before.json after.json     # 有没有用？结论：faster | slower | no clear change
 wits guide <语言>               # 这种语言里通常怎么修：python、node、go、rust、jvm、dotnet、ruby、beam、c
+wits on <where> --json <pid|进程名>   # 在另一台机器上问同样的问题：[user@]host、gcp:<虚拟机>、aws:<虚拟机>、azure:<资源组>/<虚拟机>
 ```
 
 - 读取 `summary`、`cause`、`what`、`where` 和 `blame`。如果 `blame.kind` 是 `process`，
@@ -40,9 +41,12 @@ wits guide <语言>               # 这种语言里通常怎么修：python、no
 - 按 **0.7 × 收益 + 0.3 × 容易程度** 给修复方案打分，先做得分最高的，一次只做一个（见
   [选择改什么](#选择改什么)）。
 - MCP：`claude mcp add wits -- wits mcp`（任何 MCP 客户端：命令 `wits`，参数 `mcp`）提供
-  `wits_explain`、`wits_overview`、`wits_profile`、`wits_run`、`wits_diff` 和 `wits_guide`。支持页面的
+  `wits_explain`、`wits_overview`、`wits_profile`、`wits_run`、`wits_diff`、`wits_remote` 和 `wits_guide`。支持页面的
   宿主（MCP Apps）还会显示[性能视图](#看得见的结果)。支持 skill 的工具可以复制
   [`skills/why-is-this-slow`](skills/why-is-this-slow/SKILL.md)。
+- 另一台机器：`wits on <where> --json <pid|进程名>` 通过 ssh 在那边运行 wits，或者按名字找到一台
+  云虚拟机，给出同样的答案；加 `--sudo` 才能看到其他用户的进程（见
+  [在另一台机器上](#在另一台机器上任何云都行)）。
 - Kubernetes：在节点上用 `wits --json <命名空间>/<pod>` 或 `<命名空间>/<deployment>`，
   在任何地方用 `kubectl wits -n <命名空间> deploy/<名称> --json`（见
   [Kubernetes](#kubernetes)）。
@@ -85,7 +89,8 @@ yay -S wits-bin                    # Arch (AUR)
 
 也可以从 [Releases](https://github.com/aryehlev/wits/releases) 下载二进制文件，放进
 `PATH` 即可：Linux 版（x86_64 和 aarch64）是静态链接的，macOS 版支持 Apple 芯片和 Intel。
-Kubernetes 的用法见[下文](#kubernetes)。
+Kubernetes 的用法见[下文](#kubernetes)。服务器上不用安装：
+[`wits on`](#在另一台机器上任何云都行) 从你这里去问它们。
 
 ## 用法
 
@@ -99,6 +104,7 @@ wits diff before.json after.json   # 我的改动有没有用？
 wits guide [<语言>]           # 这种语言里通常慢在哪里，通常怎么修
 wits <命名空间>/<pod>          # 一个 pod：它的每个进程（Linux）
 wits <命名空间>/<deployment>   # 所有副本，最忙的排在前面（Linux）
+wits on <where> <以上任何一种>  # 在另一台机器上：[user@]host、gcp:、aws:、azure:
 wits mcp                     # 给编程智能体用的 MCP 服务器
 ```
 
@@ -296,6 +302,47 @@ faster: 515ms → 165ms (−68%), beyond run-to-run noise (the runs do not overl
 `no clear change`，就撤销它：换不来速度的工作不值得保留。skill、MCP 服务器和页面上的“交给智能体”
 提示词都会要求编程智能体这样做，并把它们估计的分数和 wits 测到的结果一起给你看。
 
+## 在另一台机器上，任何云都行
+
+```sh
+wits on deploy@web-1 api                  # 任何你能 ssh 上去的机器，按 ~/.ssh/config 的配置
+wits on gcp:web-1 api                     # 按名字找一台 Google Cloud 虚拟机，通过 gcloud
+wits on aws:web-1 --json api              # 按 Name 标签或实例 id 找一台 EC2 实例，通过 Session Manager
+wits on azure:shop-rg/web-1 profile api   # 一台 Azure 虚拟机，通过 az ssh
+wits on --sudo gcp:web-1 --html pg.html postgres     # 在那边以 root 运行；页面写在你这边
+wits on web-1 run -n 5 -o before.json -- ./bench     # 在那边运行并测量；报告带回来
+```
+
+`wits on <where>` 在那台机器上运行 wits，把答案带回来。`<where>` 后面的内容就是你在那台机器上
+会敲的参数，`--json`、`--html` 和 `-o` 和在本地一样用：文件写在你自己的机器上。那台机器上不需要
+预先安装或监听任何东西，也不需要开放端口。第一次使用时，wits 把适合那台机器的系统和处理器的二进制
+文件（几 MB）复制到那边的 `~/.cache/wits`，以后直接用它；加 `--rm` 则用完即删。除此之外它不改动
+那台机器上的任何东西。
+
+| `<where>` | 怎么连过去 | 你需要 |
+| --- | --- | --- |
+| `[user@]host[:port]` | `ssh`，用你的密钥和 `~/.ssh/config`：跳板机、`ProxyJump`、Tailscale、Teleport，任何云或不在云上 | 能 `ssh` 上去 |
+| `gcp:[user@][project/][zone/]instance` | `gcloud compute ssh`：它负责找到虚拟机、管理密钥，虚拟机没有公网地址时走 IAP 隧道 | 已登录的 `gcloud` |
+| `aws:[user@][region/]<实例 id 或 Name 标签>` | 经 Session Manager 的 `ssh`（`aws ssm start-session`）：不需要公网地址或开放端口 | AWS CLI 和 Session Manager 插件，以及实例接受的密钥 |
+| `azure:[user@]<资源组>/<虚拟机>` | `az ssh vm`：用你的 Entra ID 登录，或用 `user@` 指定本地用户 | 已登录的 `az` 及其 `ssh` 扩展 |
+| `--via '<命令>'`（代替 `<where>`） | 任何能在那台机器上运行 shell 命令行的命令，命令行作为它的最后一个参数 | 例如 `--via 'ssh -J bastion -p 2222 web-1'`、`--via 'docker exec -i web sh -c'`、`--via 'tsh ssh web-1'` |
+
+- **`--sudo`** 让 wits 在那边以 root 运行（`sudo -n`，所以 sudo 不能要求输入密码；云镜像的默认
+  用户通常满足）。不加时，wits 只能看到你登录的那个用户的进程，而服务器上的进程大多属于别的用户。
+  在 Linux 上，root 还能带来 eBPF 调用栈。
+- **二进制文件** 从你这台机器传过去，所以那台机器不需要能上网。两边是同一种系统（并且这个 wits
+  是静态构建）时，wits 直接传它自己；否则它下载一次对应系统的发布版，核对校验和，保存在本机的
+  `~/.cache/wits`。`WITS_REMOTE_BINARY=<文件>` 可以改传你自己的二进制文件。
+- **顺着归因追过去。** 当答案把原因归到一台你能连上的主机（`blame.kind` 为 `remote`，带地址），
+  接着到那边去问：`wits on <那台主机> <服务端进程名>`。
+- **`run`** 在那台机器的登录目录里运行命令。Ctrl-C 会停掉本机的 wits；那边已经启动的命令可能继续
+  运行，因为没有终端的 ssh 不会把中断传过去。
+- 没有终端可以提问时（在脚本里，或从 MCP 服务器调用），ssh 被要求不询问密码或新的主机密钥：
+  它会直接失败并说明原因。
+- wits 必须在那台机器上运行，所以无法登录的服务（Lambda、Cloud Run、托管数据库）够不着：它们会
+  显示为你的进程在等待的 `peer`，带地址。Kubernetes 的 pod 请用
+  [`kubectl wits`](#在你的电脑上kubectl-wits)。
+
 ## Kubernetes
 
 wits 会为它报告的每个进程标出所在的 pod 和容器，信息来自 cgroup 路径和 kubelet 的日志
@@ -410,11 +457,13 @@ claude mcp add wits -- wits mcp
 | `wits_profile` | 一个进程，以及按原因划分的全部调用栈，用于火焰图 |
 | `wits_run` | 运行一条命令（`command`、`repeat`、`save`、`cwd`），报告时间花在哪里 |
 | `wits_diff` | 比较两次保存的运行：faster、slower 或 no clear change |
+| `wits_remote` | 在另一台机器上做 explain、overview 或 profile（`on`：`[user@]host`、`gcp:…`、`aws:…`、`azure:…`；`sudo`） |
 | `wits_guide` | 某种语言的程序通常慢在哪里、通常怎么修（`topic`：一种语言，或 `general`） |
 
-前五个工具都用 `--json` 运行 `wits`，把结果同时作为文本和结构化内容返回，所以它们和对应的命令
-完全一样。它们都可以把[页面](#看得见的结果)写到文件（`html_file`）；支持 MCP Apps 的
-宿主会把页面和结果一起显示。`wits_guide` 以文本返回一份[指南](#这是哪一类开销)。服务器会告诉
+除最后一个外，这些工具都用 `--json` 运行 `wits`，把结果同时作为文本和结构化内容返回，所以它们和
+对应的命令完全一样。它们都可以把[页面](#看得见的结果)写到文件（`html_file`）；支持 MCP Apps 的
+宿主会把页面和结果一起显示。`wits_remote` 就是 [`wits on`](#在另一台机器上任何云都行)：它被标记为
+会访问本机以外的地方，宿主可以在使用前先问你，而且它从不询问密码。`wits_guide` 以文本返回一份[指南](#这是哪一类开销)。服务器会告诉
 智能体怎么用这些工具：先测量，顺着归因追下去，读提示和程序所用语言的指南，
 按[收益和容易程度](#选择改什么)给修复排序，如实报告 `diff` 的结论。它在
 [MCP Registry](https://registry.modelcontextprotocol.io) 中的名字是

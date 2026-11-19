@@ -34,6 +34,7 @@ wits --json <namespace>/<deployment> # (Linux) every replica of a Deployment, St
 wits run -n 5 -o before.json -- <command...>   # run a command; where did its time go?
 wits diff --json before.json after.json        # did the change help?
 wits guide <language>                # what usually fixes it in that language (see below)
+wits on <where> --json <pid|name>    # the same on another machine (see "On another machine")
 ```
 
 - Use the pid when you have it (for a background command you started, `$!`).
@@ -51,11 +52,47 @@ wits guide <language>                # what usually fixes it in that language (s
   nodes involved; that needs permission to create privileged pods.
 - If the wits MCP server is connected (`wits mcp`), its tools do the same:
   `wits_explain`, `wits_overview`, `wits_profile`, `wits_run`, `wits_diff`,
-  and `wits_guide` for the guides.
+  `wits_remote` for another machine, and `wits_guide` for the guides.
 - Before fixing, rank the candidate fixes by 0.7 × gain + 0.3 × ease (see
   "Choose the fix" below) and start with the highest.
 - To show the user, add `--html <file>`: a web page with the answer and a
   flame graph per cause (or `html_file` with the MCP tools).
+
+## On another machine
+
+When the slow process is on a server or a cloud VM, do not guess from here
+and do not install anything there by hand: `wits on <where>` runs wits on
+that machine and brings the same answer back. What follows `<where>` is what
+you would type there.
+
+```sh
+wits on deploy@web-1 --json api            # any machine you can ssh to (names from ~/.ssh/config work)
+wits on gcp:web-1 --json api               # a Google Cloud VM by name: gcp:[project/][zone/]instance
+wits on aws:web-1 --json api               # an EC2 instance by Name tag or id: aws:[user@][region/]<id>
+wits on azure:shop-rg/web-1 --json api     # an Azure VM: azure:[user@]<resource group>/<vm>
+wits on --sudo web-1 --json                # what is waiting most there, seen as root
+wits on web-1 --html page.html --json api  # the page is written here
+```
+
+- Use the way the user already has to that machine: an ssh name from their
+  config, or the cloud CLI they are logged in to. Do not create keys, open
+  ports or change firewall rules to get in; if the login fails, show the
+  user the error.
+- Most server processes belong to another user. If the answer says the
+  process cannot be seen, or has `"confidence":"low"`, rerun with `--sudo`
+  (before `<where>`): it uses `sudo -n` and fails if sudo wants a password.
+- The first time, wits copies its binary (a few megabytes) into `~/.cache/wits` on
+  that machine and says so on stderr. It changes nothing else there. Add
+  `--rm` if the user wants nothing left behind.
+- Follow blame across machines: when `blame.kind` is `remote` and you can
+  reach that host, run `wits on <that host> --json <the server's name>`,
+  until the answer is `cpu`, `disk`, `memory`, a limit or an idle process.
+- `wits on <where> run -- <command>` runs the command on that machine. Only
+  do that with a command the user asked you to run there.
+- `wits diff` and `wits guide` work here, on files and text: no `on`.
+- It cannot reach what has no login: a managed database, Lambda, Cloud Run.
+  Those appear as the `peer` a process waits for, with the address; say so
+  and look at that service's own metrics. Kubernetes pods: `kubectl wits`.
 
 ## Reading the answer
 
@@ -267,5 +304,6 @@ wits diff --json before.json after.json
   connection, not as a stack in your handler. The guides name each runtime's
   own tool for that.
 - A process on another node is only named when that node runs the wits agent.
+  On another machine that you can log in to, ask with `wits on`.
 - It never changes or signals any process. Any fix is your decision and the
   user's.

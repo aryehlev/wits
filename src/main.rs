@@ -14,6 +14,7 @@ mod json;
 mod lang;
 mod out;
 mod mcp;
+mod on;
 mod run;
 mod ui;
 
@@ -85,6 +86,11 @@ USAGE
   wits agent [--listen <addr:port>] [--peers <host[:port],...>]
                              (Linux) answer other nodes' wits: who holds this
                              connection, and why is it slow?
+  wits on <where> [...]      the same on another machine: [user@]host over
+                             ssh, or a cloud VM by name (gcp:<instance>,
+                             aws:<instance>, azure:<group>/<vm>); what
+                             follows is what you would type there
+                             (see `wits on --help`)
 
   wits guide [<topic>]       what usually makes a program slow and what usually
                              fixes it: python, node, go, rust, jvm, dotnet,
@@ -330,6 +336,10 @@ fn main() {
         Some("diff") => {
             argv.next();
             std::process::exit(run::diff(&parse(argv)));
+        }
+        Some("on") => {
+            argv.next();
+            std::process::exit(on::run(argv.collect()));
         }
         #[cfg(target_os = "linux")]
         Some("agent") => {

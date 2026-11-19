@@ -24,7 +24,10 @@ pub struct Style {
 
 impl Style {
     pub fn detect() -> Style {
-        let tty = unsafe { libc::isatty(1) } == 1;
+        // CLICOLOR_FORCE: `wits on` shows this output on a terminal that
+        // this process cannot see.
+        let tty = unsafe { libc::isatty(1) } == 1
+            || std::env::var_os("CLICOLOR_FORCE").is_some_and(|v| !v.is_empty() && v != "0");
         Style {
             color: tty && std::env::var_os("NO_COLOR").is_none(),
         }
