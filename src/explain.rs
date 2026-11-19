@@ -1408,13 +1408,13 @@ fn analyze_with(
 
     let code_stacks = opts.stacks.then(|| {
         let mut per: HashMap<(i32, &Wait), usize> = HashMap::new();
-        for (tid, w, _) in &p.captures {
+        for (tid, w, ..) in &p.captures {
             *per.entry((*tid, w)).or_default() += 1;
         }
         let scans = p
             .captures
             .iter()
-            .filter_map(|(tid, w, st)| {
+            .filter_map(|(tid, w, st, sys)| {
                 let ns = tid_wait_ns.get(&(*tid, w.clone()))?;
                 Some(prof::Scan {
                     pid,
@@ -1422,6 +1422,7 @@ fn analyze_with(
                     cat: resolved.get(w)?.cat,
                     ns: ns / per[&(*tid, w)] as f64,
                     stack: st,
+                    sys,
                 })
             })
             .collect();

@@ -46,6 +46,8 @@ struct Capture {
     cat: Cat,
     stack: Vec<u64>,
     ns: f64,
+    /// The system call the thread was in.
+    sys: &'static str,
 }
 
 fn pipe_ino(link: &str) -> Option<u64> {
@@ -246,12 +248,17 @@ pub fn watch_tree_gated(
                             th.last_cap = tick;
                             th.ncap += 1;
                             th.cap_of.insert(c, captures.len());
+                            let sys = match proc::parse_syscall(text) {
+                                Some(proc::Syscall::In { nr, .. }) => crate::sysno::lookup(nr).1,
+                                _ => "",
+                            };
                             captures.push(Capture {
                                 pid,
                                 tid,
                                 cat: c,
                                 stack: st,
                                 ns: 0.0,
+                                sys,
                             });
                         }
                     }
@@ -327,6 +334,7 @@ pub fn watch_tree_gated(
                 cat: c.cat,
                 ns: c.ns,
                 stack: &c.stack,
+                sys: c.sys,
             })
             .collect();
         let st = prof::stacks(

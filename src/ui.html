@@ -198,6 +198,10 @@ tbody tr.sel td { background: var(--accent-soft); }
 .cellbar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
 .cellbar .b { width: 70px; height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; flex: none; }
 .cellbar .b i { display: block; height: 100%; border-radius: 3px; transition: width .6s cubic-bezier(.2, .8, .2, 1); }
+.cellbar .b.split { display: flex; }
+.cellbar .b.split i { flex: none; border-radius: 0; }
+.cellbar .b.dim i { opacity: .55; }
+.kindof { font-size: 11px; color: var(--faint); text-align: right; white-space: nowrap; margin-top: 2px; }
 .fcell { display: flex; flex-direction: column; min-width: 0; }
 .fcell .nm { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 520px; }
 .fcell .sm { font-size: 11.5px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 520px; }
@@ -580,6 +584,25 @@ function explorer(M, opts = {}) {
     return M.stacks.filter(s => st.causes.has(s.cause) && (!st.pids || st.pids.has(s.pid)) &&
       (!st.pkg || s.ids.some(i => F[i].pk === st.pkg)));
   }
+  // The frame a stack's own time is spent in. On CPU that is whatever is
+  // running, the kernel too. A thread that wants a CPU was stopped in its
+  // own code. Any other wait goes through the C library's system call into
+  // the kernel's scheduler, and belongs to the code that asked for it.
+  function selfFrame(s) {
+    const n = s.ids.length;
+    if (s.cause === "cpu") return F[s.ids[n - 1]];
+    const past = s.cause === "cpu-wait" ? f => f.kernel : f => f.kernel || f.kind === "sys";
+    let user = null;
+    for (let j = n - 1; j >= 0; j--) {
+      const f = F[s.ids[j]];
+      if (!past(f)) return f;
+      if (!f.kernel && !user) user = f;
+    }
+    return user || F[s.ids[n - 1]];
+  }
+  // What kind of time a cause is, in the words of the buttons above.
+  const kindOf = c => c === "cpu" ? "on CPU" : c === "cpu-wait" ? "waiting for a CPU" : c === "idle" ? "idle" : `waiting: ${SHORT[c]}`;
+  const onlyCause = () => st.causes.size === 1 ? [...st.causes][0] : null;
   function mineSegs(sids) {
     const out = [];
     let run = [];
@@ -888,7 +911,11 @@ function explorer(M, opts = {}) {
         // A stack cut short says nothing about which of your functions.
         if (!(n.self > 0) || n.frame?.func === SMALLER) continue;
         let a = n; while (a && a.kind !== "app") a = a.parent;
-        if (!a) { a = n; while ((a.kind === "kernel" || a.frame?.func === SMALLER) && a.parent && a.parent.kind !== "root") a = a.parent; }
+        if (!a) {
+          const waits = !["cpu", "cpu-wait"].includes(domCause(n));
+          // The C library's call is passed over only for a function above it.
+          a = n; while ((a.kind === "kernel" || a.frame?.func === SMALLER || waits && a.kind === "sys" && a.parent?.frame) && a.parent && a.parent.kind !== "root") a = a.parent;
+        }
         if (!a.frame || a.frame.func === SMALLER) continue;
         const e = acc.get(a.frame.fn) || { n: a, us: 0 };
         e.us += n.self; if (a.us > e.n.us) e.n = a;
@@ -1307,13 +1334,13 @@ function explorer(M, opts = {}) {
   // ---- top functions
   function topRows() {
     const m = new Map();
-    const get = f => { let e = m.get(f.fn); if (!e) { e = { f, self: 0, total: 0 }; m.set(f.fn, e); } return e; };
+    const get = f => { let e = m.get(f.fn); if (!e) { e = { f, self: 0, total: 0, by: {} }; m.set(f.fn, e); } return e; };
     for (const s of stacks) {
       const seen = new Set();
       for (const i of s.ids) { const f = F[i]; if (st.mine && f.kind !== "app") continue; if (seen.has(f.fn)) continue; seen.add(f.fn); get(f).total += s.us; }
-      let leaf = null;
-      for (let j = s.ids.length - 1; j >= 0; j--) { const f = F[s.ids[j]]; if (!st.mine || f.kind === "app") { leaf = f; break; } }
-      if (leaf) get(leaf).self += s.us;
+      let leaf = st.mine ? null : selfFrame(s);
+      if (st.mine) for (let j = s.ids.length - 1; j >= 0; j--) { const f = F[s.ids[j]]; if (f.kind === "app") { leaf = f; break; } }
+      if (leaf) { const e = get(leaf); e.self += s.us; e.by[s.cause] = (e.by[s.cause] || 0) + s.us; }
     }
     let rows = [...m.values()];
     if (st.q) rows = rows.filter(r => r.f.func.toLowerCase().includes(st.q) || (r.f.file || "").toLowerCase().includes(st.q) || r.f.pk.toLowerCase().includes(st.q));
@@ -1323,21 +1350,34 @@ function explorer(M, opts = {}) {
   function bar(v, total, c) {
     return el("div", { class: "cellbar" }, el("span", {}, pct(v / total)), el("div", { class: "b" }, el("i", { style: `width:${Math.max(0, v / total * 100)}%;background:${c}` })));
   }
+  // Self time, split by what kind of time it is: a row that only waits must
+  // not read as one that burns CPU. With one cause shown, the column's
+  // heading says which; with several, each row does.
+  function kindWords(by, total) {
+    const cs = CAUSES.filter(c => by[c] > 0).sort((a, b) => by[b] - by[a]);
+    return cs.filter((c, i) => !i || by[c] / total >= 0.005).slice(0, 3).map(c => cs.length > 1 ? `${kindOf(c)} ${pct(by[c] / total)}` : kindOf(c)).join(" · ");
+  }
+  function selfBar(v, by, total, dim) {
+    const segs = CAUSES.filter(c => by[c] > 0).map(c => el("i", { style: `width:${by[c] / total * 100}%;background:${causeColor(c)}`, title: `${kindOf(c)}: ${pct(by[c] / total)}` }));
+    const words = onlyCause() || !(v > 0) ? "" : kindWords(by, total);
+    return el("div", {}, el("div", { class: "cellbar" }, el("span", {}, pct(v / total)), el("div", { class: "b split" + (dim ? " dim" : "") }, segs)),
+      words ? el("div", { class: "kindof" }, words) : null);
+  }
+  const selfHead = () => "Self" + (onlyCause() ? ` · ${kindOf(onlyCause())}` : "");
   function renderTop() {
     const total = tree.us || 1, rows = topRows();
-    const main = [...st.causes][0];
     const head = (k, t, cls) => el("th", { class: "sort " + (cls || ""), onclick: () => { st.sort = k; renderMain(); } }, t, st.sort === k ? " ↓" : "");
     const tbody = el("tbody", {}, rows.map(r => el("tr", { class: r.f.fn === st.sel ? "sel" : "", onclick: () => select(r.f.fn, false), ondblclick: () => { st.view = "flame"; renderToolbar(); renderMain(); zoomToFn(r.f.fn); } },
       el("td", {}, el("div", { class: "fcell" }, el("span", { class: "nm", title: r.f.func }, r.f.name), el("span", { class: "sm" }, where(r.f) || r.f.module || ""))),
       el("td", {}, kindBadge(r.f)),
-      el("td", { class: "n" }, bar(r.self, total, r.f.kind === "app" ? causeColor(main) : "var(--faint)")),
+      el("td", { class: "n" }, selfBar(r.self, r.by, total, r.f.kind !== "app")),
       el("td", { class: "n" }, bar(r.total, total, "var(--accent)")))));
     return el("div", {},
       el("div", { class: "tscroll" }, el("table", {},
         el("thead", {}, el("tr", {}, head("name", "Function"), el("th", {}, "Whose"),
-          head("self", st.mine ? "Self (with the libraries it calls)" : "Self", "n"), head("total", "Total (with callees)", "n"))),
+          head("self", selfHead() + (st.mine ? " (with the libraries it calls)" : ""), "n"), head("total", "Total (with callees)", "n"))),
         rows.length ? tbody : el("tbody", {}, el("tr", {}, el("td", { colspan: 4, class: "empty" }, "Nothing matches."))))),
-      el("div", { class: "hintline" }, "Click a row for its callers, callees and hot lines. Double-click to find it in the flame graph."));
+      el("div", { class: "hintline" }, "Self is where the time is spent: on CPU, the function that is running; for a wait, the function that asked to wait, not the C library call or the kernel it waits in. Click a row for its callers, callees and hot lines. Double-click to find it in the flame graph."));
   }
 
   // ---- by package
@@ -1346,12 +1386,11 @@ function explorer(M, opts = {}) {
     const m = new Map();
     for (const s of stacks) {
       // CPU time in the kernel is the kernel's; waiting ends in the kernel's
-      // scheduler, so it belongs to the code that waits.
-      let leaf = F[s.ids[s.ids.length - 1]];
-      if (s.cause !== "cpu") for (let j = s.ids.length - 1; j >= 0; j--) if (!F[s.ids[j]].kernel) { leaf = F[s.ids[j]]; break; }
+      // scheduler, so it belongs to the code that waits (selfFrame).
+      const leaf = selfFrame(s);
       const through = new Set(s.ids.map(i => F[i].pk));
-      for (const p of through) { let e = m.get(p); if (!e) { e = { p, self: 0, total: 0, kind: null }; m.set(p, e); } e.total += s.us; }
-      if (leaf) m.get(leaf.pk).self += s.us;
+      for (const p of through) { let e = m.get(p); if (!e) { e = { p, self: 0, total: 0, kind: null, by: {} }; m.set(p, e); } e.total += s.us; }
+      if (leaf) { const e = m.get(leaf.pk); e.self += s.us; e.by[s.cause] = (e.by[s.cause] || 0) + s.us; }
     }
     for (const f of F) { const e = m.get(f.pk); if (e && !e.kind) e.kind = f.kind; }
     const rows = [...m.values()].sort((a, b) => b.self - a.self || b.total - a.total);
@@ -1359,19 +1398,19 @@ function explorer(M, opts = {}) {
     const col = e => e.kind === "app" ? causeColor(main) : e.kind === "lib" ? `hsl(${200 + hash(e.p) % 50} 50% 52%)` : e.kind === "kernel" ? "hsl(252 16% 50%)" : e.kind === "sys" ? "hsl(222 10% 50%)" : "hsl(222 16% 60%)";
     const sb = el("div", { class: "stackbar" });
     for (const e of rows.filter(e => e.self > 0)) {
-      const b = el("button", { style: `flex-grow:0;flex-basis:0;background:${col(e)}`, title: `${e.p}: ${pct(e.self / total)} spent in its own code. Click to show only stacks through it.`, onclick: () => setPkg(e.p) }, e.self / total > 0.06 ? `${e.p} ${pct(e.self / total)}` : "");
+      const b = el("button", { style: `flex-grow:0;flex-basis:0;background:${col(e)}`, title: `${e.p}: ${pct(e.self / total)} spent in its own code (${kindWords(e.by, total)}). Click to show only stacks through it.`, onclick: () => setPkg(e.p) }, e.self / total > 0.06 ? `${e.p} ${pct(e.self / total)}` : "");
       sb.append(b);
       requestAnimationFrame(() => requestAnimationFrame(() => { b.style.flexGrow = e.self; }));
     }
     return el("div", {},
-      el("p", { class: "muted", style: "margin:0 0 10px" }, "Whose code the time is spent in. ", el("b", {}, "Self"), " is time in the package's own code; ", el("b", {}, "through"), " counts every stack that passes through it."),
+      el("p", { class: "muted", style: "margin:0 0 10px" }, "Whose code the time is spent in. ", el("b", {}, "Self"), " is time in the package's own code: on CPU, the code that is running; for a wait, the code that asked to wait, not the C library call or the kernel it waits in. ", el("b", {}, "Through"), " counts every stack that passes through it."),
       sb,
       el("div", { class: "tscroll" }, el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "Package"), el("th", { class: "n" }, "Self"), el("th", { class: "n" }, "Through"))),
+        el("thead", {}, el("tr", {}, el("th", {}, "Package"), el("th", { class: "n" }, selfHead()), el("th", { class: "n" }, "Through"))),
         el("tbody", {}, rows.map(e => el("tr", { class: st.pkg === e.p ? "sel" : "", onclick: () => setPkg(e.p) },
           el("td", {}, el("span", { style: `display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:8px;background:${col(e)}` }), e.p,
             e.kind && e.kind !== "lib" ? el("span", { class: "faint" }, "") : null),
-          el("td", { class: "n" }, bar(e.self, total, col(e))),
+          el("td", { class: "n" }, selfBar(e.self, e.by, total, false)),
           el("td", { class: "n" }, bar(e.total, total, "var(--accent)"))))))),
       el("div", { class: "hintline" }, "Click a package to keep only the stacks that pass through it."));
   }
@@ -1386,7 +1425,7 @@ function explorer(M, opts = {}) {
       const f = F[s.ids[j]];
       r.f = r.f || f;
       r.total += s.us; r.by[s.cause] = (r.by[s.cause] || 0) + s.us;
-      if (j === s.ids.length - 1) r.self += s.us;
+      if (selfFrame(s)?.fn === fn) r.self += s.us;
       if (f.line) { const k = f.file + ":" + f.line; r.lines.set(k, (r.lines.get(k) || 0) + s.us); }
       let up = j - 1;
       if (st.mine) while (up >= 0 && F[s.ids[up]].kind !== "app") up--;

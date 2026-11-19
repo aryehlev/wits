@@ -204,7 +204,12 @@ pub fn origin(f: &Frame) -> (Kind, Option<String>) {
         return (Kind::Kernel, None);
     }
     if f.func == "[unknown]" {
-        return (Kind::Unknown, None);
+        // A function of the C library that has no name is still the C
+        // library's: a libc without symbols must not look like a package.
+        return match by_module(&f.module) {
+            Some((Kind::Sys, _)) => (Kind::Sys, None),
+            _ => (Kind::Unknown, None),
+        };
     }
     if let Some(o) = f.file.as_deref().and_then(by_path) {
         return o;
@@ -931,6 +936,13 @@ mod tests {
         assert_eq!(k("std::vector<int>::push_back", "app", None), "std");
         assert_eq!(k("writev", "libc.so.6", None), "sys");
         assert_eq!(k("writev", "svc", None), "sys");
+        // Without a name, the C library is still the C library; other code is unknown.
+        assert_eq!(k("[unknown]", "libc.so.6", None), "sys");
+        assert_eq!(k("epoll_wait", "libc.so.6", None), "sys");
+        assert_eq!(k("[unknown]", "ld-musl-x86_64.so.1", None), "sys");
+        assert_eq!(k("[unknown]", "svc", None), "unknown");
+        assert_eq!(k("[unknown]", "libssl.so.3", None), "unknown");
+        assert_eq!(k("[unknown]", "", None), "unknown");
         assert_eq!(k("SSL_write", "libssl.so.3", None), "lib:libssl");
         assert_eq!(k("flush_log", "where", Some("/home/u/wits/cases/where.c")), "app");
         assert_eq!(k("java.util.HashMap::get", "[jit]", None), "std");

@@ -141,6 +141,8 @@ pub struct Scan<'a> {
     pub cat: Cat,
     pub ns: f64,
     pub stack: &'a [u64],
+    /// The system call the thread was in, or "" when that is not known.
+    pub sys: &'static str,
 }
 
 pub struct Inputs<'a> {
@@ -203,6 +205,26 @@ fn strip_tracing(k: &mut Vec<Frame>) {
     k.drain(..n);
 }
 
+/// The system call a kernel stack is in: "epoll_wait" for one that came in
+/// through `__x64_sys_epoll_wait`.
+fn syscall_of(k: &[Frame]) -> Option<&str> {
+    const ENTRY: &[&str] = &["__x64_sys_", "__arm64_sys_", "__ia32_sys_", "__riscv_sys_", "__s390x_sys_", "__se_sys_", "__do_sys_", "SyS_"];
+    // From the root: the way in comes before what it calls.
+    k.iter().rev().find_map(|f| ENTRY.iter().find_map(|p| f.func.strip_prefix(p))).filter(|n| !n.is_empty())
+}
+
+/// A thread in a system call whose innermost user function is one of the C
+/// library's with no name (hidden, in a libc without symbols) is in the
+/// library's code for that call: the system call names it. Unnamed code
+/// anywhere else stays unknown: a name would make it look like the
+/// program's own function.
+fn name_leaf(u: &mut [Frame], sys: &str) {
+    let Some(f) = u.first_mut() else { return };
+    if !sys.is_empty() && f.func == "[unknown]" && crate::code::origin(f).0 == crate::code::Kind::Sys {
+        f.func = sys.to_string();
+    }
+}
+
 pub fn stacks(inp: Inputs, sym: &mut Symbolizer) -> Stacks {
     for (p, _) in &inp.pids {
         sym.snapshot(*p);
@@ -229,7 +251,8 @@ pub fn stacks(inp: Inputs, sym: &mut Symbolizer) -> Stacks {
         }
     };
     for s in &inp.scans {
-        let frames = sym.user(s.pid, s.stack);
+        let mut frames = sym.user(s.pid, s.stack);
+        name_leaf(&mut frames, s.sys);
         let ids: Vec<usize> = frames.into_iter().map(|f| st.intern(f)).collect();
         if s.cat != Cat::Idle {
             note_depth(&st, &ids, s.ns);
@@ -282,6 +305,10 @@ pub fn stacks(inp: Inputs, sym: &mut Symbolizer) -> Stacks {
                 }
                 _ => cat,
             };
+            // After the cause is decided: a name must not change it.
+            if let Some(sys) = syscall_of(&k) {
+                name_leaf(&mut u, sys);
+            }
             let ids: Vec<usize> = k.into_iter().chain(u).map(|f| st.intern(f)).collect();
             if cat != Cat::Idle {
                 note_depth(&st, &ids, r.ns as f64);
@@ -374,6 +401,35 @@ mod tests {
                 ..Frame::default()
             })
             .collect()
+    }
+
+    #[test]
+    fn a_nameless_leaf_takes_the_system_calls_name() {
+        let entry = k(&["__schedule", "schedule_hrtimeout_range", "ep_poll", "do_epoll_wait", "__x64_sys_epoll_wait", "do_syscall_64", "entry_SYSCALL_64_after_hwframe"]);
+        assert_eq!(syscall_of(&entry), Some("epoll_wait"));
+        assert_eq!(syscall_of(&k(&["__schedule", "futex_wait", "do_futex", "__arm64_sys_futex", "invoke_syscall"])), Some("futex"));
+        // A page fault, or a stack that does not reach the way in.
+        assert_eq!(syscall_of(&k(&["__schedule", "io_schedule", "filemap_fault", "handle_mm_fault", "asm_exc_page_fault"])), None);
+        assert_eq!(syscall_of(&[]), None);
+
+        let libc = |func: &str| Frame { func: func.into(), module: "libc.so.6".into(), ..Frame::default() };
+        let mut stack = vec![libc("[unknown]"), u(&["mio::sys::unix::selector::Selector::select"]).remove(0)];
+        name_leaf(&mut stack, "epoll_wait");
+        assert_eq!((stack[0].func.as_str(), stack[0].module.as_str()), ("epoll_wait", "libc.so.6"));
+        assert_eq!(crate::code::origin(&stack[0]).0, crate::code::Kind::Sys);
+        // A function with a name keeps it; so does an unnamed one that is not the leaf.
+        let mut stack = vec![libc("__GI___poll"), libc("[unknown]")];
+        name_leaf(&mut stack, "poll");
+        assert_eq!((stack[0].func.as_str(), stack[1].func.as_str()), ("__GI___poll", "[unknown]"));
+        // No system call known: nothing to name it after.
+        let mut stack = vec![libc("[unknown]")];
+        name_leaf(&mut stack, "");
+        assert_eq!(stack[0].func, "[unknown]");
+        // Not the C library's: it stays unknown, and is not taken for the program's.
+        let mut stack = vec![Frame { func: "[unknown]".into(), module: "svc".into(), ..Frame::default() }];
+        name_leaf(&mut stack, "read");
+        assert_eq!(stack[0].func, "[unknown]");
+        name_leaf(&mut [], "read");
     }
 
     #[test]

@@ -422,7 +422,7 @@ pub struct Profile {
     pub locks: Option<String>,
     pub nice: i64,
     /// User stacks of blocked threads: thread, what it waited for, stack.
-    pub captures: Vec<(i32, Wait, Vec<u64>)>,
+    pub captures: Vec<(i32, Wait, Vec<u64>, &'static str)>,
     mem: Option<Option<fs::File>>,
 }
 
@@ -669,11 +669,15 @@ pub fn sample(pid: i32, dur: Duration, stacks: bool) -> Option<Profile> {
                 let wchan = proc::slurp(&format!("{base}/wchan"))
                     .map(|w| w.trim().to_string())
                     .filter(|w| !w.is_empty() && w != "0");
-                classify(s.state, sc, wchan.as_deref()).map(|w| (w, regs))
+                let sys = match sc {
+                    Some(Syscall::In { nr, .. }) => sysno::lookup(nr).1,
+                    _ => "",
+                };
+                classify(s.state, sc, wchan.as_deref()).map(|w| (w, regs, sys))
             };
-            let (wait, regs) = match wait {
-                Some((w, r)) => (Some(w), r),
-                None => (None, None),
+            let (wait, regs, sys) = match wait {
+                Some((w, r, sys)) => (Some(w), r, sys),
+                None => (None, None, ""),
             };
             if let Some(w) = &wait {
                 p.note(w, tid, &tids);
@@ -699,7 +703,7 @@ pub fn sample(pid: i32, dur: Duration, stacks: bool) -> Option<Profile> {
                 if due && th.ncap < CAPTURE_MAX && !matches!(w, Wait::Stopped) {
                     th.last_cap = Some(i);
                     th.ncap += 1;
-                    cap = Some((tid, w.clone(), sc.stack(sp, pc)));
+                    cap = Some((tid, w.clone(), sc.stack(sp, pc), sys));
                 }
             }
             match wait {
