@@ -5,7 +5,9 @@
 Explain why a process is slow: the cause, how much of its time it costs, the
 exact file, lock or socket involved, which other process is to blame, and
 where in the code the time goes. Linux and macOS, any language, one binary.
-No root needed; with root it sees more.
+No root needed. With root it sees every user's processes, and on Linux it
+uses eBPF for stacks on and off the CPU: the programs are built into wits,
+with nothing to install.
 
 [简体中文](README.zh-CN.md)
 
