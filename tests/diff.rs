@@ -85,3 +85,26 @@ fn a_report_of_an_older_wits_has_only_its_hottest_lines() {
     assert!(out.contains(r#"{"cause":"cpu","func":"sort","file":"/src/lib/deflate.c","before":0.307,"after":0.200}"#), "{out}");
     assert!(out.contains("a report was saved by an older wits"), "{out}");
 }
+
+#[test]
+fn the_same_code_in_another_directory_is_the_same_functions() {
+    // Two checkouts of one tree: every path differs.
+    let before = report("/src/base", [1990, 2000, 2010], 0.767, 0.904, (0.5, 0.5), true);
+    let after = report("/src/new", [1090, 1100, 1110], 0.741, 0.040, (0.0004, 0.0), true);
+    let out = diff("moved", &before, &after, &["--json"]);
+    // Each function once, under the path it has now (or had, when it is
+    // gone): not twice, as gone from one directory and new in the other.
+    for row in [
+        r#"{"cause":"cpu","func":"init","file":"/src/new/lib/mf.c","before":0.904,"after":0.040}"#,
+        r#"{"cause":"lock","func":"take","file":"/src/base/lib/pool.c","before":0.500,"after":0.000}"#,
+        r#"{"cause":"cpu","func":"sort","file":"/src/new/lib/deflate.c","before":0.767,"after":0.741}"#,
+    ] {
+        assert!(out.contains(row), "{row} is not in {out}");
+    }
+    assert_eq!(out.matches(r#""func":"#).count(), 3, "{out}");
+
+    let text = diff("moved-text", &before, &after, &[]);
+    assert!(text.contains("−864ms  init (…/new/lib/mf.c)  cpu 904ms → 40ms"), "{text}");
+    assert!(text.contains("−500ms  take (…/base/lib/pool.c)  lock 500ms → 0ms gone"), "{text}");
+    assert!(!text.lines().any(|l| l.ends_with(" new")), "{text}");
+}

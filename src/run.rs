@@ -577,6 +577,54 @@ fn functions(v: &Value, whole: bool) -> HashMap<FnKey, f64> {
     m
 }
 
+/// How many components two paths share from the end: 2 for
+/// "/src/base/lib/f.c" and "/src/new/lib/f.c".
+fn common_tail(a: &str, b: &str) -> usize {
+    a.rsplit('/').zip(b.rsplit('/')).take_while(|(x, y)| x == y).count()
+}
+
+/// The same source tree in another place (a second checkout, a build
+/// directory, a container) has the same functions: by path alone each of
+/// them would be reported twice, as gone and as new. A function seen only
+/// before and one of the same name seen only after are one function when
+/// their files have the same name and each is the other's closest match:
+/// the longest shared end of the path, with no tie. Its time before then
+/// goes under the file it has after.
+fn pair_moved(fa: &mut HashMap<FnKey, f64>, fb: &HashMap<FnKey, f64>) {
+    // The one of `others` whose file shares the longest end with `k`'s.
+    fn closest<'a>(k: &FnKey, others: &[&'a FnKey]) -> Option<&'a FnKey> {
+        let tail = |o: &FnKey| common_tail(&k.2, &o.2);
+        let best = others.iter().map(|o| tail(o)).max().filter(|t| *t > 0)?;
+        let mut same = others.iter().filter(|o| tail(o) == best);
+        match (same.next(), same.next()) {
+            (Some(o), None) => Some(*o),
+            _ => None,
+        }
+    }
+    // Seen on one side only, by cause and name: (before, after).
+    type Sides<'a> = (Vec<&'a FnKey>, Vec<&'a FnKey>);
+    let mut by_name: HashMap<(&str, &str), Sides> = HashMap::new();
+    for k in fa.keys().filter(|k| !k.2.is_empty() && !fb.contains_key(*k)) {
+        by_name.entry((&k.0, &k.1)).or_default().0.push(k);
+    }
+    for k in fb.keys().filter(|k| !k.2.is_empty() && !fa.contains_key(*k)) {
+        by_name.entry((&k.0, &k.1)).or_default().1.push(k);
+    }
+    let mut moved: Vec<(FnKey, FnKey)> = Vec::new();
+    for (before, after) in by_name.values() {
+        for a in before {
+            if let Some(b) = closest(a, after).filter(|b| closest(b, before) == Some(*a)) {
+                moved.push(((*a).clone(), b.clone()));
+            }
+        }
+    }
+    for (a, b) in moved {
+        if let Some(x) = fa.remove(&a) {
+            fa.insert(b, x);
+        }
+    }
+}
+
 fn runs(v: &Value) -> Vec<f64> {
     let r: Vec<f64> = v.get("runs_ms").arr().iter().filter_map(|x| x.num()).collect();
     if r.is_empty() {
@@ -659,7 +707,8 @@ pub fn diff(a: &Args) -> i32 {
     // one that has not, so then both are compared by their hottest lines.
     let old = |v: &Value| v.get("functions").is_null() && !v.get("code").is_null();
     let whole = !old(&va) && !old(&vb);
-    let (fa, fb) = (functions(&va, whole), functions(&vb, whole));
+    let (mut fa, fb) = (functions(&va, whole), functions(&vb, whole));
+    pair_moved(&mut fa, &fb);
     // Compare functions only for causes both runs have stacks for: a run
     // without root has no on-CPU stacks, and that is not a speedup. A cause
     // has stacks when it has a hot spot; its functions may all be too small
@@ -825,5 +874,51 @@ mod tests {
         let lines = functions(&v, false);
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[&key("cpu", "work", "/src/w.c")], 0.2);
+    }
+
+    #[test]
+    fn a_moved_tree_is_the_same_functions() {
+        assert_eq!(common_tail("/src/base/lib/f.c", "/src/new/lib/f.c"), 2);
+        assert_eq!(common_tail("/src/base/lib/f.c", "/src/base/lib/g.c"), 0);
+        let map = |v: &[(&str, &str, &str, f64)]| -> HashMap<FnKey, f64> {
+            v.iter().map(|(c, f, p, s)| (key(c, f, p), *s)).collect()
+        };
+        let mut before = map(&[
+            // Another checkout: the same file under another directory.
+            ("cpu", "sort", "/src/base/lib/deflate.c", 0.767),
+            // Two files of one name: each goes with the one that shares more of its path.
+            ("cpu", "init", "/src/base/zlib/util.c", 0.3),
+            ("cpu", "init", "/src/base/gzip/util.c", 0.2),
+            // Nothing to tell these apart: left alone.
+            ("cpu", "get", "/a/api.py", 0.1),
+            // Another file, another cause, no file: not the same function.
+            ("cpu", "parse", "/src/base/json.c", 0.4),
+            ("disk", "flush", "/src/base/log.c", 0.5),
+            ("cpu", "hidden", "", 0.6),
+            // In the same place on both sides.
+            ("cpu", "main", "/src/main.c", 0.7),
+        ]);
+        let after = map(&[
+            ("cpu", "sort", "/src/new/lib/deflate.c", 0.741),
+            ("cpu", "init", "/src/new/gzip/util.c", 0.25),
+            ("cpu", "init", "/src/new/zlib/util.c", 0.35),
+            ("cpu", "get", "/b/api.py", 0.1),
+            ("cpu", "get", "/c/api.py", 0.1),
+            ("cpu", "parse", "/src/new/xml.c", 0.4),
+            ("cpu", "flush", "/src/new/log.c", 0.5),
+            ("cpu", "main", "/src/main.c", 0.6),
+        ]);
+        pair_moved(&mut before, &after);
+        let expect = map(&[
+            ("cpu", "sort", "/src/new/lib/deflate.c", 0.767),
+            ("cpu", "init", "/src/new/zlib/util.c", 0.3),
+            ("cpu", "init", "/src/new/gzip/util.c", 0.2),
+            ("cpu", "get", "/a/api.py", 0.1),
+            ("cpu", "parse", "/src/base/json.c", 0.4),
+            ("disk", "flush", "/src/base/log.c", 0.5),
+            ("cpu", "hidden", "", 0.6),
+            ("cpu", "main", "/src/main.c", 0.7),
+        ]);
+        assert_eq!(before, expect);
     }
 }
