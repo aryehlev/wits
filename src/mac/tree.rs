@@ -44,6 +44,8 @@ struct Pr {
     /// Kinds of fds 0..2 and whether it has connected sockets / files.
     stdin: Option<StdKind>,
     sockets: bool,
+    /// A TCP connect not answered yet (SYN_SENT).
+    connecting: bool,
     files: bool,
     sampler: Option<Running>,
     out: Option<SampleOut>,
@@ -63,6 +65,7 @@ fn snapshot_fds(pid: i32, pr: &mut Pr) {
     let Some(fds) = ffi::fds(pid) else { return };
     pr.pipes.clear();
     pr.sockets = false;
+    pr.connecting = false;
     pr.files = false;
     pr.stdin = None;
     for f in fds.iter().take(4096) {
@@ -74,8 +77,9 @@ fn snapshot_fds(pid: i32, pr: &mut Pr) {
                 StdKind::Pipe
             }
             ffi::FD_SOCKET => {
-                if ffi::socket(pid, f.fd).map(|s| super::fds::connected(&s)).unwrap_or(false) {
-                    pr.sockets = true;
+                if let Some(s) = ffi::socket(pid, f.fd) {
+                    pr.sockets |= super::fds::connected(&s);
+                    pr.connecting |= s.kind == 2 && s.tcp_state == 2;
                 }
                 StdKind::Socket
             }
@@ -122,6 +126,8 @@ fn cat_of(l: &Leaf, pid: i32, procs: &HashMap<i32, Pr>) -> Cat {
             _ => Cat::Idle,
         },
         Leaf::Connect | Leaf::Open | Leaf::Reply => Cat::Peer,
+        // An event loop waiting while one of its connections is being opened.
+        Leaf::Events(_) | Leaf::RunLoop if pr.connecting => Cat::Peer,
         Leaf::Events(_) if pr.sockets => Cat::Peer,
         // Waiting for a child of the tree: that child's time is counted.
         Leaf::Child => Cat::Idle,
@@ -195,6 +201,7 @@ pub fn watch_tree(root: i32, want_stacks: bool, done: &mut dyn FnMut() -> bool) 
                 pipes: Vec::new(),
                 stdin: None,
                 sockets: false,
+                connecting: false,
                 files: false,
                 sampler: None,
                 out: None,

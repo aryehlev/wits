@@ -571,6 +571,16 @@ impl Ctx<'_> {
                 ),
                 Leaf::Child => r(Cat::Peer, "waiting for its child processes to finish".into(), None),
                 Leaf::Sleep => r(Cat::Idle, "asleep on its own timer".into(), None),
+                // An event loop (Node, Python's asyncio, a run loop) while one
+                // of its connections is still being opened: it waits on that.
+                Leaf::Events(_) | Leaf::RunLoop if self.connecting().is_some() && !self.listens() => {
+                    let f = self.connecting().unwrap();
+                    r(
+                        Cat::Peer,
+                        format!("connecting: {}, no answer yet (waiting in its event loop)", fds::desc(f)),
+                        Some(f.fd),
+                    )
+                }
                 Leaf::Events(sys) => {
                     // One connection and no listener: it is waiting on that peer.
                     let conns: Vec<&Fd> = self
@@ -634,6 +644,17 @@ impl Ctx<'_> {
             ),
             W::Brief => r(Cat::Idle, "waiting for brief sleeps".into(), None),
         }
+    }
+
+    /// A TCP socket whose connect has not been answered yet (SYN_SENT).
+    fn connecting(&self) -> Option<&Fd> {
+        self.fds
+            .iter()
+            .find(|f| matches!(&f.kind, Kind::Socket(s) if s.kind == 2 && s.tcp_state == 2))
+    }
+
+    fn listens(&self) -> bool {
+        self.fds.iter().any(|f| matches!(&f.kind, Kind::Socket(s) if s.listening()))
     }
 
     fn guess_file(&self) -> Option<i32> {
@@ -1029,8 +1050,24 @@ pub fn analyze_full(pid: i32, opts: Opts) -> Option<(Answer, Option<Stacks>)> {
             .max_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, wt, _)| (wt.clone(), resolved[wt].clone()))
     };
-    let idle_what = top_wait(Cat::Idle)
-        .map(|x| x.1.label)
+    // What the main thread waits on says what the program is doing; a pool of
+    // parked worker threads (Node's, a JVM's) would otherwise outweigh it.
+    let main_idle = threads
+        .iter()
+        .find(|(_, t)| t.name == "main thread")
+        .and_then(|(id, _)| per_thread.get(id))
+        .and_then(|parts| {
+            parts
+                .iter()
+                .filter_map(|(k, ns)| match k {
+                    Key::W(wt) if resolved[wt].cat == Cat::Idle => Some((wt, *ns)),
+                    _ => None,
+                })
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+        })
+        .map(|(wt, _)| resolved[wt].label.clone());
+    let idle_what = main_idle
+        .or_else(|| top_wait(Cat::Idle).map(|x| x.1.label))
         .unwrap_or_else(|| "idle".into());
     let mut breakdown: Vec<(Cat, f64)> = CAUSES
         .iter()
@@ -1453,6 +1490,55 @@ mod tests {
             module: m.into(),
             ..Frame::default()
         }
+    }
+
+    fn tcp(fd: i32, state: i32, port: u16) -> Fd {
+        let ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 255, 255, 1));
+        Fd {
+            fd,
+            kind: Kind::Socket(ffi::Socket {
+                flags: 0,
+                kind: 2,
+                pcb: 0,
+                local: ffi::SockAddr::In { ip, port: 50000 },
+                remote: ffi::SockAddr::In { ip, port },
+                tcp_state: state,
+                rcv: 0,
+                snd: 0,
+                unix_peer_pcb: 0,
+                so_options: 0,
+            }),
+        }
+    }
+
+    fn cx(fds: &[Fd]) -> Ctx<'_> {
+        Ctx {
+            pid: 1,
+            fds,
+            fds_readable: true,
+            swap_in: false,
+            pressure: 0,
+            wrote: false,
+            unsure: std::cell::Cell::new(false),
+            many: std::cell::Cell::new(0),
+        }
+    }
+
+    #[test]
+    fn event_loop_waits_on_a_connect_in_progress() {
+        // Node's loop (uv__io_poll -> kevent) while a connect has no answer.
+        let fds = [tcp(15, 2, 8080)];
+        let r = cx(&fds).resolve(&W::L(Leaf::RunLoop));
+        assert_eq!(r.cat, Cat::Peer);
+        assert_eq!(r.fd, Some(15));
+        assert!(r.label.starts_with("connecting: "), "{}", r.label);
+        assert_eq!(cx(&fds).resolve(&W::L(Leaf::Events("kevent".into()))).cat, Cat::Peer);
+        // Connected, or a server with a listener: still an idle loop.
+        let fds = [tcp(15, 4, 8080)];
+        assert_eq!(cx(&fds).resolve(&W::L(Leaf::RunLoop)).cat, Cat::Idle);
+        let fds = [tcp(15, 2, 8080), tcp(16, 1, 0)];
+        assert_eq!(cx(&fds).resolve(&W::L(Leaf::RunLoop)).cat, Cat::Idle);
+        assert_eq!(cx(&[]).resolve(&W::L(Leaf::RunLoop)).cat, Cat::Idle);
     }
 
     #[test]

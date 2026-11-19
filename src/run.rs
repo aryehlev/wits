@@ -314,6 +314,21 @@ fn build(cmd: &[String], runs: Vec<RunResult>) -> Report {
         cv
     });
     let flame = (!merged.is_empty()).then(|| code::flame_json(&merged, 2000));
+    // Time nothing accounts for: no thread ran, and what they waited on has
+    // no name. A program asleep on a timer (a retry back-off) looks like this,
+    // and the causes above would otherwise say nothing about most of the run.
+    let walls: Vec<f64> = runs.iter().map(|r| r.wall_ns).collect();
+    let (wall, busy) = (median(&walls), by_cat.iter().filter(|c| c.0 != Cat::Idle).map(|c| c.1).sum::<f64>());
+    if wall >= 1e9 && busy < 0.5 * wall {
+        notes.insert(
+            0,
+            format!(
+                "{} of the {} it took is not accounted for: nothing ran and it waited on nothing wits could name, so it was most likely asleep on a timer (a sleep, a retry back-off) or waiting for input",
+                secs(wall - busy),
+                secs(wall)
+            ),
+        );
+    }
     Report {
         command: cmd.to_vec(),
         walls: runs.iter().map(|r| r.wall_ns).collect(),
