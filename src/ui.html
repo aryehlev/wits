@@ -1607,12 +1607,22 @@ function upstream(b, depth) {
     el("div", { class: "faint", style: "font-size:12px;margin-top:4px" }, `answered by the wits agent on node ${u.node}`),
     upstream(a.blame, depth + 1));
 }
-const RANK = "List the candidate fixes and rank them by score = 0.7 × gain + 0.3 × ease, where gain (0–1) is the share of the measured time the change would remove (at most the cause's share × the hot spot's share) and ease (0–1) is 1 for a flag, config value or one-line change, 0.7 for a small change in one function, 0.4 for several files or an API change, 0.1 for a redesign. Show the scores and make the highest-scoring change first, one at a time.";
+const RANK = "List the candidate fixes and rank them by score = 0.7 × gain + 0.3 × ease, where gain (0–1) is the share of the measured time the change would remove (at most the cause's share × the hot spot's or the known cost's share) and ease (0–1) is 1 for a flag, config value or one-line change, 0.7 for a small change in one function, 0.4 for several files or an API change, 0.1 for a redesign. Show the scores and make the highest-scoring change first, one at a time.";
+// What wits recognised in the stacks, for a prompt: each known cost with its
+// measured share and what usually fixes it, and where to read more.
+function hintText(code) {
+  const hs = (code?.hints || []).slice(0, 4).map(h => h.whole
+    ? `- First: ${h.means}. ${h.try}`
+    : `- ${h.cause}: ${pct(h.share)} is ${h.means} (most in ${h.seen}). ${h.try}`);
+  return [hs.length ? "Known costs, summed over every stack (they can overlap):\n" + hs.join("\n") : "",
+    code?.lang ? `Before choosing a fix, read \`wits guide ${code.lang}\` and \`wits guide general\`: what usually works, settings first.` : ""].filter(Boolean).join("\n");
+}
+
 function answerPrompt(a) {
   const hot = (a.code?.causes || []).filter(c => c.cause !== "idle").flatMap(c => (c.hot || []).slice(0, 3).map(h =>
     `- ${c.cause}: ${pct(h.share)} in ${h.frame.func}${h.frame.file ? ` (${fullWhere(h.frame)})` : ""}${h.leaf ? `, inside ${h.leaf.func}` : ""}`)).slice(0, 6);
   return [`wits measured this: ${a.summary}.`, a.what && `What: ${a.what}`, a.where && `Where: ${a.where}`, a.blame?.text && `Blame: ${a.blame.text}`,
-    hot.length ? "Hottest code:\n" + hot.join("\n") : "",
+    hot.length ? "Hottest code:\n" + hot.join("\n") : "", hintText(a.code),
     "Look at that code and explain what makes it slow.", RANK,
     "Measure each change before and after with `wits run -n 5 -o before.json -- <command>` and `wits diff`, report the verdict as it is, and undo a change that buys no clear speedup."].filter(Boolean).join("\n");
 }
@@ -1714,7 +1724,7 @@ function runPrompt(r, cmd) {
     `- ${c.cause}: ${pct(h.share)} in ${h.frame.func}${h.frame.file ? ` (${fullWhere(h.frame)})` : ""}`)).slice(0, 6);
   const bd = r.breakdown || {};
   return [`wits ran \`${cmd}\`: it took ${msec(r.wall_ms)} (exit ${r.exit}). Time by cause: ${CAUSES.filter(c => c !== "idle" && bd[c] > 0.003).map(c => `${c} ${pct(bd[c])}`).join(", ")}.`,
-    hot.length ? "Hottest code:\n" + hot.join("\n") : "",
+    hot.length ? "Hottest code:\n" + hot.join("\n") : "", hintText(r.code),
     "Make it faster where the time goes.", RANK,
     "Save this run with `wits run -n 5 -o before.json -- " + cmd + "`, make the change, run again with -o after.json, and report `wits diff before.json after.json` as it is; undo a change that buys no clear speedup."].filter(Boolean).join("\n");
 }

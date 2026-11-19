@@ -33,6 +33,7 @@ wits --json <namespace>/<pod>        # (Linux, on the node) each process of a po
 wits --json <namespace>/<deployment> # (Linux) every replica of a Deployment, StatefulSet, DaemonSet or Job
 wits run -n 5 -o before.json -- <command...>   # run a command; where did its time go?
 wits diff --json before.json after.json        # did the change help?
+wits guide <language>                # what usually fixes it in that language (see below)
 ```
 
 - Use the pid when you have it (for a background command you started, `$!`).
@@ -49,7 +50,8 @@ wits diff --json before.json after.json        # did the change help?
   Without the wits DaemonSet it starts short-lived privileged pods on the
   nodes involved; that needs permission to create privileged pods.
 - If the wits MCP server is connected (`wits mcp`), its tools do the same:
-  `wits_explain`, `wits_overview`, `wits_profile`, `wits_run`, `wits_diff`.
+  `wits_explain`, `wits_overview`, `wits_profile`, `wits_run`, `wits_diff`,
+  and `wits_guide` for the guides.
 - Before fixing, rank the candidate fixes by 0.7 × gain + 0.3 × ease (see
   "Choose the fix" below) and start with the highest.
 - To show the user, add `--html <file>`: a web page with the answer and a
@@ -68,12 +70,25 @@ Abridged:
           "text":"its own I/O: it read 0 B, wrote 5.3 MB; no other visible process is doing more"},
  "breakdown":{"disk":0.97,"cpu":0.03,"cpu-wait":0.0,"memory":0.0,"lock":0.0,"peer":0.0},
  "idle":0.0,"confidence":"high","followed":[],"notes":[],
- "code":{"source":"ebpf+stack-scan","notes":[],"causes":[
+ "code":{"source":"ebpf+stack-scan","lang":"c","notes":[],"causes":[
    {"cause":"disk","seconds":1.94,"hot":[
      {"share":1.0,"seconds":1.94,
       "frame":{"func":"flush_log","module":"server","file":"/srv/app/log.c","line":41},
       "leaf":{"func":"fsync","module":"libc.so.6","file":null,"line":null},
-      "callers":[{"func":"handle_request","module":"server","file":"/srv/app/server.c","line":88}]}]}]}}
+      "callers":[{"func":"handle_request","module":"server","file":"/srv/app/server.c","line":88}]}]}],
+   "hints":[]}}
+```
+
+And `code.hints` of a Go server that is on CPU:
+
+```json
+"lang":"go",
+"hints":[
+ {"cause":"cpu","share":0.42,"seconds":1.05,"id":"alloc-gc","lang":"go","seen":"runtime.scanobject",
+  "means":"allocating memory and collecting garbage",
+  "try":"Allocate less on the hot path: … As a setting, GOGC=200 or more trades memory for fewer collections; …"},
+ {"cause":"cpu","share":0.26,"seconds":0.64,"id":"json","lang":"go","seen":"encoding/json.stateInString",
+  "means":"encoding/json: JSON encoding and decoding driven by reflection","try":"…"}]
 ```
 
 | Field | Meaning |
@@ -90,6 +105,8 @@ Abridged:
 | `breakdown` | Share of non-idle time for all six causes |
 | `code.causes` | Per cause, the hottest functions: `frame` (the first function in the program's own code), `via` (the library function it called on the way), `leaf` (where the time actually is, e.g. `fsync`), `callers`, `share`, `seconds` |
 | `frame.kind`, `frame.package` | Whose code a frame is: `app` (the program's own), `lib` (a dependency, named in `package`: a crate, Go module, npm, Python or Ruby package, or shared library), `std` (the language's standard library and runtime), `sys` (the C library), `kernel`. Change `app` code; a `lib` hot spot usually means the program calls it too often or with too much data. |
+| `code.lang` | The program's language, when the stacks tell: `python`, `node`, `go`, `rust`, `jvm`, `dotnet`, `ruby`, `beam` (Erlang, Elixir), `c` (C, C++), or `null`. Read the guide for it (below). |
+| `code.hints` | Costs wits knows by name, summed over every stack, largest first: allocation and garbage collection, the interpreter's own loop, regex, JSON, reflection, a contended lock, a debug build. `cause` and `share`: the part of that cause's time spent in it. `seen`: the function most of it was seen in. `means` and `try`: what it is and what usually fixes it. `"whole": true` is a sign about the whole program (a debug build, a sanitizer): fix that before anything else. `[]` when wits recognised nothing. |
 | `code.source`, `code.notes` | How stacks were collected (`ebpf`, `stack-scan`, `sample`), and what is missing and why |
 | `pod` | `namespace/pod/container` when the process runs in Kubernetes, else `null` |
 | `followed` | Parents wits skipped because they were only waiting for this child |
@@ -127,6 +144,49 @@ for example `node --perf-basic-prof` or `PYTHONPERFSUPPORT=1`. `wits run` sets
 the environment-variable ones itself. Restarting a running service with a
 switch is the user's decision.
 
+## Know the language
+
+wits says where the time goes. What to change depends on the language, and
+the same few causes come back in each one. Before you choose a fix, read the
+guide for `code.lang`, and `general` for what holds everywhere:
+
+| `code.lang` | Guide | Covers |
+| --- | --- | --- |
+| `python` | [guides/python.md](guides/python.md) | CPython: the interpreter loop, the GIL, imports, ORMs, asyncio |
+| `node` | [guides/node.md](guides/node.md) | Node.js, JavaScript, TypeScript: the one thread, V8's collector, sequential awaits |
+| `go` | [guides/go.md](guides/go.md) | Allocation and GC, `GOGC`, `GOMAXPROCS` in containers, goroutines wits cannot see |
+| `rust` | [guides/rust.md](guides/rust.md) | Release builds, allocation, hashing, async runtimes |
+| `jvm` | [guides/jvm.md](guides/jvm.md) | Java, Kotlin, Scala: heap and collector, warm-up, ORMs, build daemons |
+| `dotnet` | [guides/dotnet.md](guides/dotnet.md) | C#, F#: Release builds, GC, LINQ, blocking on async code |
+| `ruby` | [guides/ruby.md](guides/ruby.md) | CRuby and Rails: YJIT, GC, N+1 queries, boot time |
+| `beam` | [guides/beam.md](guides/beam.md) | Erlang, Elixir: schedulers, mailboxes wits cannot see, ETS |
+| `c` | [guides/c.md](guides/c.md) | C and C++: optimisation flags, allocators, containers, iostreams |
+| any | [guides/general.md](guides/general.md) | Each cause in any language: databases and N+1 queries, networks, disks, containers, builds and tests, and when a measurement misleads |
+
+Without the files, `wits guide <language>` prints the same text, and the MCP
+tool `wits_guide` returns it. `wits guide` alone lists the topics.
+
+Each guide has, in this order: how to make the runtime show the program's own
+functions; the settings to try before changing code; a table from what is in
+the stack (and each `code.hints` id) to what it means and what usually works;
+the usual `lock`, `peer`, `disk` and `memory` problems; and what misleads when
+measuring.
+
+How to use a hint and a guide together:
+
+1. A hint with `"whole": true` comes first. A debug build, a sanitizer or a
+   race detector makes every other number about a different program.
+2. A hint is a measured share, so it bounds the gain: at most
+   `breakdown[hint.cause] × hint.share` of the time.
+3. Hints overlap each other and the hot spots: JSON decoding that allocates is
+   in both `json` and `alloc-gc`. Do not add their shares.
+4. The hot spot says where to change the code; the hint says what kind of
+   work it is; the guide says what usually helps and which setting to try
+   first. A hint without a matching hot spot (allocation spread over the whole
+   program) is fixed by a setting or at the few call sites that allocate most.
+5. `try` and the guides say what usually works, not what will. Measure each
+   change with `wits run` and `wits diff`.
+
 ## Choose the fix: most gain for the least effort
 
 Before changing code, list the candidate fixes and score each one:
@@ -136,10 +196,15 @@ Before changing code, list the candidate fixes and score each one:
 - **gain** (0 to 1): the share of the measured time the change would remove.
   wits gives the upper bound: the cause's `share` times the hot spot's
   `share` in `code.causes` (for a run report, `breakdown[cause]` times the hot
-  spot's `share`). A fix that removes half of a hot spot gets half of that.
+  spot's `share`), or times a hint's `share` in `code.hints`. A fix that
+  removes half of a hot spot gets half of that.
 - **ease** (0 to 1): **1** a flag, a config value or one line; **0.7** a small
   change inside one function; **0.4** several functions or files, or an API
   change; **0.1** a redesign, a new dependency or a different architecture.
+
+The guides list settings first because they are ease 1: an environment
+variable, a build flag, a runtime option. Put the ones that match the cause
+among the candidates even when a code change would gain more.
 
 Make the highest-scoring change first, one change at a time, and measure each
 one (below). Tell the user the scores you estimated next to what `wits diff`
@@ -194,6 +259,13 @@ wits diff --json before.json after.json
   `wits run`, processes that live under 60 ms have no stacks, and short runs
   undercount function time.
 - Python before 3.12 shows interpreter functions, not the program's.
+- `code.hints` holds the costs wits knows by name, not every cost: an empty
+  list does not mean the code is fine. `code.lang` is `null` when no frame
+  tells the language (a stripped binary, stacks that stop early).
+- wits watches threads. Goroutines, async tasks and Erlang processes that
+  wait hold no thread: their waits show as idle threads or as `peer` on a
+  connection, not as a stack in your handler. The guides name each runtime's
+  own tool for that.
 - A process on another node is only named when that node runs the wits agent.
 - It never changes or signals any process. Any fix is your decision and the
   user's.

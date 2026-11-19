@@ -23,16 +23,20 @@ wits --json <pid|进程名>        # 为什么慢：原因、具体对象、该�
 wits --json                    # 不知道是哪个进程？列出现在等待最多的进程
 wits run -n 5 -o before.json -- <命令...>   # 改动之前；改动之后用 -o after.json 再跑一次
 wits diff --json before.json after.json     # 有没有用？结论：faster | slower | no clear change
+wits guide <语言>               # 这种语言里通常怎么修：python、node、go、rust、jvm、dotnet、ruby、beam、c
 ```
 
 - 读取 `summary`、`cause`、`what`、`where` 和 `blame`。如果 `blame.kind` 是 `process`，
   接着问 wits `blame.pid` 这个进程，直到答案是 `cpu`、`disk`、`memory`、cgroup 限额、
   远程主机或一个空闲的进程。
+- 还要读 `code.lang` 和 `code.hints`：wits 按名字认得的开销，带有测量到的占比（“42% 的 CPU
+  时间花在内存分配和垃圾回收上”），以及通常的修法。选择修复方案之前，先读这种语言的
+  `wits guide`（见[这是哪一类开销](#这是哪一类开销)）。
 - 如实报告 `diff` 的结论：`no clear change` 不是提速。只对可以安全重复运行的命令使用 `-n`。
 - 按 **0.7 × 收益 + 0.3 × 容易程度** 给修复方案打分，先做得分最高的，一次只做一个（见
   [选择改什么](#选择改什么)）。
 - MCP：`claude mcp add wits -- wits mcp`（任何 MCP 客户端：命令 `wits`，参数 `mcp`）提供
-  `wits_explain`、`wits_overview`、`wits_profile`、`wits_run` 和 `wits_diff`。支持页面的
+  `wits_explain`、`wits_overview`、`wits_profile`、`wits_run`、`wits_diff` 和 `wits_guide`。支持页面的
   宿主（MCP Apps）还会显示[性能视图](#看得见的结果)。支持 skill 的工具可以复制
   [`skills/why-is-this-slow`](skills/why-is-this-slow/SKILL.md)。
 - Kubernetes：在节点上用 `wits --json <命名空间>/<pod>` 或 `<命名空间>/<deployment>`，
@@ -88,6 +92,7 @@ wits <目标> <目标>...          # 一次看多个，最忙的排在前面
 wits profile <pid|进程名>     # 每一种原因，以及它最热的调用路径
 wits run -- <命令...>         # 运行一条命令：它的时间花到哪里去了？
 wits diff before.json after.json   # 我的改动有没有用？
+wits guide [<语言>]           # 这种语言里通常慢在哪里，通常怎么修
 wits <命名空间>/<pod>          # 一个 pod：它的每个进程（Linux）
 wits <命名空间>/<deployment>   # 所有副本，最忙的排在前面（Linux）
 wits mcp                     # 给编程智能体用的 MCP 服务器
@@ -168,6 +173,39 @@ libbpf，什么都不用装。
   `--yjit-perf`、`+JPperf true`），而 `wits run` 会替你设置那些环境变量形式的开关。
 - **macOS** 只显示原生栈帧：解释型代码的函数看不到。
 
+### 这是哪一类开销
+
+热点说明时间花在哪里。但时间常常不在一个地方：每个函数都分配一点内存，加起来就是整个运行的
+三分之一。所以 wits 还会把它按名字认得的开销在所有调用栈上加总，并说明每一项是什么。使用
+`--json` 时，它们和热点放在一起：
+
+```json
+"code":{"lang":"go","hints":[
+ {"cause":"cpu","share":0.42,"seconds":1.05,"id":"alloc-gc","lang":"go","seen":"runtime.scanobject",
+  "means":"allocating memory and collecting garbage",
+  "try":"Allocate less on the hot path: … As a setting, GOGC=200 or more trades memory for fewer collections; set GOMEMLIMIT with it to bound the heap."},
+ {"cause":"cpu","share":0.26,"seconds":0.64,"id":"json","lang":"go","seen":"encoding/json.stateInString",
+  "means":"encoding/json: JSON encoding and decoding driven by reflection",
+  "try":"… Decode into typed structs, not map[string]any; … easyjson, goccy/go-json, bytedance/sonic …"}]}
+```
+
+- `lang` 是程序的语言，从调用栈里读出来：`python`、`node`、`go`、`rust`、`jvm`、`dotnet`、
+  `ruby`、`beam` 或 `c`。
+- 每条提示都是测量结果：`share` 是这种原因的时间里经过这些函数的部分，`seen` 是其中占时间最多的
+  函数。提示之间可以重叠（会分配内存的 JSON 解码两边都算）。
+- wits 认得大约七十种：各个运行时的内存分配和垃圾回收、解释器自己的循环、正则、JSON、反射、
+  异常、格式化、哈希、GIL 和有竞争的互斥锁、启动和预热、缺页、零碎的读写，以及忘了摘掉的工具
+  （覆盖率、调试器）。
+- `"whole": true` 表示这是关于整个程序的信号：Rust 的 dev 构建、.NET 的 Debug 构建、sanitizer、
+  Go 的竞态检测器。先解决它；否则其余的数字描述的是另一个程序。
+
+`wits guide <语言>` 打印这种语言的程序通常慢在哪里、通常怎么修，从最省事的开始：怎样让运行时
+显示你自己的函数，改代码之前先试哪些设置（`GOGC`、`--max-semi-space-size`、
+`-XX:MaxRAMPercentage`、`RUBY_YJIT_ENABLE`、release 构建），每个运行时函数变热意味着什么，
+以及常见的锁、网络和磁盘问题。`wits guide general` 讲任何语言都适用的内容：N+1 查询、连接、
+fsync、容器限额、构建和测试。同样的文字也在 [skill](skills/why-is-this-slow/guides) 里（英文），
+并且可以通过 MCP 工具 `wits_guide` 取得。
+
 ### 看得见的结果
 
 给任何命令加上 `--html <文件>`，wits 还会把答案写成一个可以点击浏览的自包含网页：
@@ -242,8 +280,8 @@ faster: 515ms → 165ms (−68%), beyond run-to-run noise (the runs do not overl
 **得分 = 0.7 × 收益 + 0.3 × 容易程度**
 
 - **收益**（0 到 1）：这个改动能去掉的、测量到的时间所占的比例。wits 给出上限：原因的占比乘以热点的
-  占比（磁盘占 96%，其中 100% 在 `flush_log` 里，那么在那里修复的上限是 0.96）。只去掉热点一半的
-  修复，收益也只有一半。
+  占比（磁盘占 96%，其中 100% 在 `flush_log` 里，那么在那里修复的上限是 0.96），或者乘以一条
+  [提示](#这是哪一类开销)的占比。只去掉热点一半的修复，收益也只有一半。
 - **容易程度**（0 到 1）：**1** 一个参数、一个配置值或一行代码；**0.7** 一个函数里的小改动；
   **0.4** 涉及几个函数或文件，或者改 API；**0.1** 重新设计、引入新依赖或换架构。
 
@@ -371,17 +409,21 @@ claude mcp add wits -- wits mcp
 | `wits_profile` | 一个进程，以及按原因划分的全部调用栈，用于火焰图 |
 | `wits_run` | 运行一条命令（`command`、`repeat`、`save`、`cwd`），报告时间花在哪里 |
 | `wits_diff` | 比较两次保存的运行：faster、slower 或 no clear change |
+| `wits_guide` | 某种语言的程序通常慢在哪里、通常怎么修（`topic`：一种语言，或 `general`） |
 
-每个工具都用 `--json` 运行 `wits`，把结果同时作为文本和结构化内容返回，所以它和对应的命令
-完全一样。每个工具都可以把[页面](#看得见的结果)写到文件（`html_file`）；支持 MCP Apps 的
-宿主会把页面和结果一起显示。服务器会告诉智能体怎么用这些工具：先测量，顺着归因追下去，
+前五个工具都用 `--json` 运行 `wits`，把结果同时作为文本和结构化内容返回，所以它们和对应的命令
+完全一样。它们都可以把[页面](#看得见的结果)写到文件（`html_file`）；支持 MCP Apps 的
+宿主会把页面和结果一起显示。`wits_guide` 以文本返回一份[指南](#这是哪一类开销)。服务器会告诉
+智能体怎么用这些工具：先测量，顺着归因追下去，读提示和程序所用语言的指南，
 按[收益和容易程度](#选择改什么)给修复排序，如实报告 `diff` 的结论。它在
 [MCP Registry](https://registry.modelcontextprotocol.io) 中的名字是
 `mcp-name: io.github.aryehlev/wits`。如果要给它 root 权限（eBPF 调用栈、其他用户的进程），改为注册
 `sudo wits mcp`，前提是你信任这个智能体。
 
 对于支持 skill 的智能体（Claude Code 等），`skills/why-is-this-slow/SKILL.md` 教它什么时候
-运行 wits、如何解读结果，以及如何用 `wits run` 和 `wits diff` 检验修复。把这个目录复制到
+运行 wits、如何解读结果，以及如何用 `wits run` 和 `wits diff` 检验修复。旁边的 `guides/`
+目录里每种语言有一页（Python、Node.js、Go、Rust、JVM、.NET、Ruby、Erlang 和 Elixir、C 和
+C++），还有一页适用于任何语言；智能体读和 `code.lang` 对应的那一页。把这个目录复制到
 你的 skills 目录：
 
 ```sh

@@ -4,7 +4,8 @@
 //! text and as structured content, so the tools do exactly what the
 //! commands do. Hosts that show tool results as pages (MCP Apps) get the
 //! page in ui.rs, with flame graphs; others get the JSON, and any tool can
-//! also write the page to a file (`html_file`).
+//! also write the page to a file (`html_file`). `wits_guide` returns a
+//! guide (guide.rs) as it is.
 
 use crate::json::{self, Value};
 use crate::out::esc;
@@ -23,9 +24,16 @@ Call wits_explain on the slow process (a pid you started is best; a name, or on 
 node namespace/pod or namespace/<deployment> for every replica). Read cause, what, where and \
 blame: blame names the process, lock holder or remote host responsible; ask wits_explain about \
 a blamed process in turn until the answer is cpu, disk, memory, a cgroup limit, a remote host \
-or an idle process. Before changing code, list candidate fixes and rank them by \
+or an idle process. code.lang names the program's language, and code.hints lists the costs wits \
+knows by name, summed over every stack (allocation and garbage collection, the interpreter's own \
+loop, regex, JSON, a lock, a debug build...): each has the share of that cause's time, what it \
+means and what usually fixes it. Before choosing a fix, call wits_guide with that language (and \
+'general' for databases, networks, disks, containers, builds and tests): it says how to make the \
+runtime show its functions, which settings to try before changing code, and what usually works \
+for each cause. Then list candidate fixes and rank them by \
 score = 0.7 x gain + 0.3 x ease. gain (0-1) is the share of the measured time the change would \
-remove: at most the cause's share times the hot spot's share, less for a partial fix. ease (0-1) \
+remove: at most the cause's share times the hot spot's or the hint's share, less for a partial \
+fix (a hint with whole:true, such as a debug build, concerns all of the time). ease (0-1) \
 is 1 for a flag, config value or one-line change, 0.7 for a small change in one function, 0.4 \
 for several functions or files or an API change, 0.1 for a redesign or new dependency. Make the \
 highest-scoring change first, one at a time, and tell the user the estimated scores. To check \
@@ -85,7 +93,14 @@ const TOOLS: &str = r#"[
     "html_file":{"type":"string","description":"Also write the comparison as a web page to this path."}},
    "required":["before","after"]},
   "annotations":{"readOnlyHint":true,"openWorldHint":false},
-  "_meta":{"ui":{"resourceUri":"ui://wits/view.html"}}}
+  "_meta":{"ui":{"resourceUri":"ui://wits/view.html"}}},
+ {"name":"wits_guide",
+  "title":"What usually fixes it",
+  "description":"What usually makes a program in one language slow and what usually fixes it, cheapest first: how to make the runtime show its functions, the settings to try before changing code, what the runtime's own functions mean when they are hot, and the usual fixes for cpu, lock, peer, disk and memory. Call it with the language in an answer's code.lang before choosing a fix. 'general' covers what holds in every language: databases, networks, disks, containers, builds and tests.",
+  "inputSchema":{"type":"object","properties":{
+    "topic":{"type":"string","enum":["general","python","node","go","rust","jvm","dotnet","ruby","beam","c"],"description":"A language as code.lang names it (node: JavaScript and TypeScript; jvm: Java, Kotlin, Scala; dotnet: C#, F#; beam: Erlang, Elixir; c: C and C++), or general."}},
+   "required":["topic"]},
+  "annotations":{"readOnlyHint":true,"openWorldHint":false}}
 ]"#;
 
 type Out = Arc<Mutex<std::io::Stdout>>;
@@ -268,6 +283,14 @@ fn tail(b: &[u8], max: usize) -> String {
 fn call(params: &Value, n: u64, running: &Mutex<HashMap<String, i32>>, key: &str) -> String {
     let name = params.get("name").str().unwrap_or("");
     let failed = |msg: &str| format!("{{\"content\":[{{\"type\":\"text\",\"text\":{}}}],\"isError\":true}}", esc(msg));
+    if name == "wits_guide" {
+        let topic = params.get("arguments").get("topic").str().unwrap_or("");
+        return match crate::guide::find(topic) {
+            Some(g) => format!("{{\"content\":[{{\"type\":\"text\",\"text\":{}}}],\"isError\":false}}", esc(g.text)),
+            None if topic.is_empty() => failed(&format!("give a topic. The topics:\n{}", crate::guide::list())),
+            None => failed(&format!("no guide for '{topic}'. The topics:\n{}", crate::guide::list())),
+        };
+    }
     let p = match plan(name, params.get("arguments"), n) {
         Ok(p) => p,
         Err(e) => return failed(&e),
@@ -400,11 +423,33 @@ mod tests {
     fn tools_are_valid_json() {
         let t = json::parse(TOOLS).unwrap();
         let names: Vec<&str> = t.arr().iter().filter_map(|x| x.get("name").str()).collect();
-        assert_eq!(names, ["wits_explain", "wits_overview", "wits_profile", "wits_run", "wits_diff"]);
+        assert_eq!(names, ["wits_explain", "wits_overview", "wits_profile", "wits_run", "wits_diff", "wits_guide"]);
         for x in t.arr() {
-            assert_eq!(x.get("_meta").get("ui").get("resourceUri").str(), Some(VIEW));
+            // Every tool that reports on processes has the page; a guide is text.
+            let page = x.get("_meta").get("ui").get("resourceUri").str();
+            assert_eq!(page, (x.get("name").str() != Some("wits_guide")).then_some(VIEW));
             assert_eq!(x.get("inputSchema").get("type").str(), Some("object"));
         }
+    }
+
+    #[test]
+    fn guides() {
+        // The tool offers exactly the guides there are.
+        let t = json::parse(TOOLS).unwrap();
+        let tool = t.arr().iter().find(|x| x.get("name").str() == Some("wits_guide")).unwrap();
+        let offered: Vec<&str> = tool.get("inputSchema").get("properties").get("topic").get("enum").arr().iter().filter_map(|x| x.str()).collect();
+        let have: Vec<&str> = crate::guide::GUIDES.iter().map(|g| g.key).collect();
+        assert_eq!(offered, have);
+        let running = Mutex::new(HashMap::new());
+        let ask = |topic: &str| json::parse(&call(&json::parse(&format!(r#"{{"name":"wits_guide","arguments":{{"topic":"{topic}"}}}}"#)).unwrap(), 1, &running, "1")).unwrap();
+        let r = ask("go");
+        assert_eq!(r.get("isError").bool(), Some(false));
+        assert!(r.get("content").arr()[0].get("text").str().unwrap().starts_with("# Go"));
+        // Another name for it works; an unknown one lists the topics.
+        assert!(ask("golang").get("content").arr()[0].get("text").str().unwrap().starts_with("# Go"));
+        let r = ask("cobol");
+        assert_eq!(r.get("isError").bool(), Some(true));
+        assert!(r.get("content").arr()[0].get("text").str().unwrap().contains("python"));
     }
 
     #[test]

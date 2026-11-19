@@ -9,7 +9,7 @@ repository = "https://github.com/aryehlev/wits"
 readme = "README.md"
 keywords = ["performance", "profiler", "ebpf", "debugging", "cli"]
 categories = ["command-line-utilities", "development-tools::profiling"]
-include = ["/src/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
+include = ["/src/**", "/skills/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
 
 [dependencies]
 libc = "0.2"

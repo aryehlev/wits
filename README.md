@@ -26,18 +26,24 @@ wits --json <pid|name>        # why is it slow: cause, object, who is to blame, 
 wits --json                   # don't know which process? the ones waiting most right now
 wits run -n 5 -o before.json -- <command...>   # before a change; again with -o after.json
 wits diff --json before.json after.json        # did it help? verdict: faster | slower | no clear change
+wits guide <language>         # what usually fixes it in python, node, go, rust, jvm, dotnet, ruby, beam, c
 ```
 
 - Read `summary`, `cause`, `what`, `where` and `blame`. When `blame.kind`
   is `process`, ask wits about `blame.pid` next, until the answer is `cpu`,
   `disk`, `memory`, a cgroup limit, a remote host or an idle process.
+- Read `code.lang` and `code.hints` too: the costs wits knows by name, with
+  their measured share ("42% of the CPU time is allocation and garbage
+  collection"), and what usually fixes each. Then read `wits guide` for that
+  language before you choose a fix (see
+  [What kind of work it is](#what-kind-of-work-it-is)).
 - Report the `diff` verdict as it is: `no clear change` is not a speedup. Only
   repeat (`-n`) commands that are safe to run again.
 - Pick fixes by **0.7 × gain + 0.3 × ease** and make the highest-scoring one
   first, one at a time (see [Choosing what to change](#choosing-what-to-change)).
 - MCP: `claude mcp add wits -- wits mcp` (any MCP client: command `wits`,
   argument `mcp`) gives you `wits_explain`, `wits_overview`, `wits_profile`,
-  `wits_run` and `wits_diff`. Hosts that show pages (MCP Apps) also get the
+  `wits_run`, `wits_diff` and `wits_guide`. Hosts that show pages (MCP Apps) also get the
   [profile view](#see-it). For skills, copy
   [`skills/why-is-this-slow`](skills/why-is-this-slow/SKILL.md).
 - Kubernetes: `wits --json <namespace>/<pod>` or `<namespace>/<deployment>`
@@ -94,6 +100,7 @@ wits <target> <target>...    # several at once, busiest first
 wits profile <pid|name>      # every cause, with its hottest call paths
 wits run -- <command...>     # run a command; where did its time go?
 wits diff before.json after.json   # did my change help?
+wits guide [<language>]      # what usually makes it slow in that language, and what fixes it
 wits <namespace>/<pod>       # a pod: each of its processes (Linux)
 wits <namespace>/<deployment>      # every replica, busiest first (Linux)
 wits mcp                     # an MCP server for coding agents
@@ -177,6 +184,47 @@ Languages:
   `jcmd <pid> Compiler.perfmap`, `DOTNET_PerfMapEnabled=1`, `--yjit-perf`,
   `+JPperf true`), and `wits run` sets the environment ones for you.
 - **macOS** shows native frames only: interpreted functions stay hidden.
+
+### What kind of work it is
+
+A hot spot says where the time is. Often the time is not in one place: every
+function allocates a little, and together that is a third of the run. So wits
+also sums, over every stack, the costs it knows by name, and says what each
+one is. With `--json`, next to the hot spots:
+
+```json
+"code":{"lang":"go","hints":[
+ {"cause":"cpu","share":0.42,"seconds":1.05,"id":"alloc-gc","lang":"go","seen":"runtime.scanobject",
+  "means":"allocating memory and collecting garbage",
+  "try":"Allocate less on the hot path: … As a setting, GOGC=200 or more trades memory for fewer collections; set GOMEMLIMIT with it to bound the heap."},
+ {"cause":"cpu","share":0.26,"seconds":0.64,"id":"json","lang":"go","seen":"encoding/json.stateInString",
+  "means":"encoding/json: JSON encoding and decoding driven by reflection",
+  "try":"… Decode into typed structs, not map[string]any; … easyjson, goccy/go-json, bytedance/sonic …"}]}
+```
+
+- `lang` is the program's language, read from the stacks: `python`, `node`,
+  `go`, `rust`, `jvm`, `dotnet`, `ruby`, `beam` or `c`.
+- A hint is a measurement: `share` is the part of that cause's time that
+  passed through those functions, and `seen` the function most of it was in.
+  Hints can overlap (JSON decoding that allocates is in both).
+- wits knows about seventy of them: allocation and garbage collection in
+  each runtime, the interpreter's own loop, regex, JSON, reflection,
+  exceptions, formatting, hashing, the GIL and contended mutexes, start-up
+  and warm-up, page faults, small reads and writes, and tools left attached
+  (coverage, a debugger).
+- `"whole": true` marks a sign about the whole program: a Rust dev build, a
+  .NET Debug build, a sanitizer, Go's race detector. Fix that first; the rest
+  describes a different program.
+
+`wits guide <language>` prints what usually makes a program in that language
+slow and what usually fixes it, cheapest first: how to make the runtime show
+your functions, the settings to try before touching code (`GOGC`,
+`--max-semi-space-size`, `-XX:MaxRAMPercentage`, `RUBY_YJIT_ENABLE`, a
+release build), what each runtime function means when it is hot, and the
+usual lock, network and disk problems. `wits guide general` covers what holds
+in any language: N+1 queries, connections, fsync, container limits, builds
+and tests. The same text is in the
+[skill](skills/why-is-this-slow/guides) and behind the `wits_guide` MCP tool.
 
 ### See it
 
@@ -270,7 +318,8 @@ each candidate:
 - **gain** (0 to 1): the share of the measured time the change would remove.
   wits gives the upper bound: the cause's share times the hot spot's share (a
   disk cause at 96%, with 100% of it in `flush_log`, bounds a fix there at
-  0.96). A fix that removes half of a hot spot gets half of that.
+  0.96), or times a [hint](#what-kind-of-work-it-is)'s share. A fix that
+  removes half of a hot spot gets half of that.
 - **ease** (0 to 1): **1** a flag, a config value or one line; **0.7** a small
   change inside one function; **0.4** several functions or files, or an API
   change; **0.1** a redesign, a new dependency or a different architecture.
@@ -417,12 +466,15 @@ example:
 | `wits_profile` | one process, with every stack by cause, for a flame graph |
 | `wits_run` | run a command (`command`, `repeat`, `save`, `cwd`) and report where its time went |
 | `wits_diff` | compare two saved runs: faster, slower or no clear change |
+| `wits_guide` | what usually makes a program in one language slow and what usually fixes it (`topic`: a language, or `general`) |
 
-Each tool runs `wits` with `--json` and returns that answer, as text and as
-structured content, so it does exactly what the command does. Each can also
-write the [page](#see-it) to a file (`html_file`); hosts that support MCP
-Apps show the page with the result. The server tells the agent how to use
-them: measure first, follow the blame, rank fixes by
+The first five run `wits` with `--json` and return that answer, as text and
+as structured content, so each does exactly what the command does. Each can
+also write the [page](#see-it) to a file (`html_file`); hosts that support
+MCP Apps show the page with the result. `wits_guide` returns a
+[guide](#what-kind-of-work-it-is) as text. The server tells the agent how to
+use them: measure first, follow the blame, read the hints and the guide for
+the program's language, rank fixes by
 [gain and ease](#choosing-what-to-change), and report a `diff` verdict as it
 is. In the [MCP Registry](https://registry.modelcontextprotocol.io) it is
 `mcp-name: io.github.aryehlev/wits`. To give it root (eBPF stacks, other
@@ -431,8 +483,11 @@ with that.
 
 For agents that read skills (Claude Code and others),
 `skills/why-is-this-slow/SKILL.md` teaches when to run wits, how to read
-the answer, and how to check a fix with `wits run` and `wits diff`. Copy the
-folder into your skills directory:
+the answer, and how to check a fix with `wits run` and `wits diff`. Next to
+it, `guides/` has a page per language (Python, Node.js, Go, Rust, the JVM,
+.NET, Ruby, Erlang and Elixir, C and C++) and one for any language; the agent
+reads the one that matches `code.lang`. Copy the folder into your skills
+directory:
 
 ```sh
 mkdir -p ~/.claude/skills

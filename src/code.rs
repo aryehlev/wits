@@ -4,6 +4,8 @@
 //! graphs.
 
 use crate::answer::{Cat, CAUSES};
+use crate::hint::Hint;
+use crate::lang::Lang;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
@@ -352,6 +354,15 @@ fn crate_of(n: &str) -> Option<&str> {
     (!c.is_empty() && c.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_')).then_some(c)
 }
 
+/// The first element of the import paths of Go's standard library.
+pub const GO_STD: &[&str] = &[
+    "runtime", "syscall", "internal", "sync", "net", "os", "io", "bufio", "fmt", "strings",
+    "bytes", "strconv", "encoding", "crypto", "reflect", "time", "sort", "math", "compress",
+    "context", "errors", "unicode", "regexp", "hash", "path", "database", "log", "mime",
+    "text", "html", "container", "slices", "maps", "iter", "unique", "weak", "vendor",
+    "archive", "debug", "embed", "expvar", "flag", "image", "plugin", "testing",
+];
+
 fn by_name(n: &str, no_file: bool) -> Option<(Kind, Option<String>)> {
     const STD: Option<(Kind, Option<String>)> = Some((Kind::Std, None));
     const SYS: Option<(Kind, Option<String>)> = Some((Kind::Sys, None));
@@ -383,15 +394,8 @@ fn by_name(n: &str, no_file: bool) -> Option<(Kind, Option<String>)> {
     }
     // Go's standard library: an import path whose first element is one of these
     if !n.contains("::") && !n.contains(' ') && n.contains('.') {
-        const GO: &[&str] = &[
-            "runtime", "syscall", "internal", "sync", "net", "os", "io", "bufio", "fmt", "strings",
-            "bytes", "strconv", "encoding", "crypto", "reflect", "time", "sort", "math", "compress",
-            "context", "errors", "unicode", "regexp", "hash", "path", "database", "log", "mime",
-            "text", "html", "container", "slices", "maps", "iter", "unique", "weak", "vendor",
-            "archive", "debug", "embed", "expvar", "flag", "image", "plugin", "testing",
-        ];
         let head = n.split(['/', '.']).next().unwrap_or("");
-        if GO.contains(&head) {
+        if GO_STD.contains(&head) {
             return STD;
         }
     }
@@ -562,8 +566,12 @@ pub struct CauseCode {
 #[derive(Clone, Debug)]
 pub struct CodeView {
     pub source: &'static str,
+    /// The language of the program, when the stacks tell.
+    pub lang: Option<Lang>,
     /// Causes in order of time, then idle last.
     pub causes: Vec<CauseCode>,
+    /// Costs known by name, summed over every stack (hint.rs).
+    pub hints: Vec<Hint>,
     pub notes: Vec<String>,
 }
 
@@ -641,9 +649,12 @@ pub fn summarize(st: &Stacks, per_cause: usize) -> CodeView {
     let idle = idle.map(|i| causes.remove(i));
     causes.sort_by(|a, b| b.ns.total_cmp(&a.ns));
     causes.extend(idle);
+    let (lang, hints) = crate::hint::find(st, &kinds);
     CodeView {
         source: st.source,
+        lang,
         causes,
+        hints,
         notes: st.notes.clone(),
     }
 }

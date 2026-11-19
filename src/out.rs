@@ -312,11 +312,31 @@ pub fn code_json(cv: &CodeView) -> String {
             )
         })
         .collect();
+    let hints: Vec<String> = cv
+        .hints
+        .iter()
+        .map(|h| {
+            format!(
+                "{{\"cause\":{},\"share\":{},\"seconds\":{},\"id\":{},\"lang\":{},\"seen\":{},\"means\":{},\"try\":{}{}}}",
+                esc(h.cat.key()),
+                num(h.share),
+                num(h.ns / 1e9),
+                esc(h.id),
+                h.lang.map(|l| esc(l.key())).unwrap_or_else(|| "null".into()),
+                esc(&h.seen),
+                esc(h.means),
+                esc(h.fix),
+                if h.whole { ",\"whole\":true" } else { "" }
+            )
+        })
+        .collect();
     let notes: Vec<String> = cv.notes.iter().map(|n| esc(n)).collect();
     format!(
-        "{{\"source\":{},\"causes\":[{}],\"notes\":[{}]}}",
+        "{{\"source\":{},\"lang\":{},\"causes\":[{}],\"hints\":[{}],\"notes\":[{}]}}",
         esc(cv.source),
+        cv.lang.map(|l| esc(l.key())).unwrap_or_else(|| "null".into()),
         causes.join(","),
+        hints.join(","),
         notes.join(",")
     )
 }

@@ -8,6 +8,8 @@ compile_error!("wits works on Linux and macOS.");
 
 mod answer;
 mod code;
+mod guide;
+mod hint;
 mod json;
 mod lang;
 mod out;
@@ -84,6 +86,9 @@ USAGE
                              (Linux) answer other nodes' wits: who holds this
                              connection, and why is it slow?
 
+  wits guide [<topic>]       what usually makes a program slow and what usually
+                             fixes it: python, node, go, rust, jvm, dotnet,
+                             ruby, beam, c, or general (any language)
   wits mcp                   an MCP server on stdin/stdout for coding agents
 
 OPTIONS
@@ -317,6 +322,10 @@ fn main() {
         Some("mcp") => {
             argv.next();
             std::process::exit(mcp::serve());
+        }
+        Some("guide") => {
+            argv.next();
+            std::process::exit(guide::run(&parse(argv).rest));
         }
         Some("diff") => {
             argv.next();
