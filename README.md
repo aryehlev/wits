@@ -2,6 +2,8 @@
 
 **witr tells you why it is running. wits tells you why it is slow.**
 
+**AI coding agents:** start with [For coding agents](#for-coding-agents).
+
 Explain why a process is slow: the cause, how much of its time it costs, the
 exact file, lock or socket involved, which other process is to blame, and
 where in the code the time goes. Linux and macOS, any language, one binary.
@@ -21,8 +23,6 @@ tree to where the time goes ([See it](#see-it)).
 `top` shows you a number. `wits` gives you the sentence you would have written
 after ten minutes with `top`, `iotop`, `strace`, `lsof`, `/proc/locks` and a
 profiler.
-
-If you are a coding agent, start with [For coding agents](#for-coding-agents).
 
 ## Install
 
