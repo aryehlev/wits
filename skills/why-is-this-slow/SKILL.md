@@ -274,6 +274,9 @@ wits diff --json before.json after.json
   first failing run. Only repeat commands that are safe to run again (tests,
   builds, benchmarks), never a migration or a deploy. Use the same command and
   input before and after.
+- The saved report has `functions`: every function's `seconds` for each
+  `cause`, all of its lines added up. `code.causes[].hot` is only the hottest
+  lines; `wits diff` compares `functions`.
 - The diff has `verdict`: `faster`, `slower` or `no clear change`;
   `wall_ms.before`, `wall_ms.after` and `wall_ms.change` (a fraction, −0.68 is
   68% faster); `noise`, which says whether the runs overlap; `causes`, seconds

@@ -222,6 +222,9 @@ pub struct Report {
     pub cpu_ns: f64,
     pub procs: Vec<ProcRow>,
     pub code: Option<CodeView>,
+    /// Every function's time per cause (`code::functions_json`): what
+    /// `wits diff` compares. `code` has only the hottest lines.
+    pub functions: Option<String>,
     /// Every stack, for a flame graph (`code::flame_json`).
     pub flame: Option<String>,
     pub notes: Vec<String>,
@@ -313,6 +316,7 @@ fn build(cmd: &[String], runs: Vec<RunResult>) -> Report {
         cv.notes.clear();
         cv
     });
+    let functions = (!merged.is_empty()).then(|| code::functions_json(&merged));
     let flame = (!merged.is_empty()).then(|| code::flame_json(&merged, 2000));
     // Time nothing accounts for: no thread ran, and what they waited on has
     // no name. A program asleep on a timer (a retry back-off) looks like this,
@@ -337,6 +341,7 @@ fn build(cmd: &[String], runs: Vec<RunResult>) -> Report {
         cpu_ns,
         procs,
         code,
+        functions,
         flame,
         notes,
     }
@@ -461,6 +466,9 @@ pub fn json(r: &Report) -> String {
             .map(crate::out::code_json)
             .unwrap_or_else(|| "null".into())
     ));
+    if let Some(fns) = &r.functions {
+        f.push(format!("\"functions\":{fns}"));
+    }
     if let Some(fl) = &r.flame {
         f.push(format!("\"flame\":{fl}"));
     }
@@ -535,26 +543,86 @@ fn load(path: &str) -> Value {
     v
 }
 
+/// A function in a report: (cause, function, file).
+type FnKey = (String, String, String);
+
 /// Function seconds by (cause, function, file): lines move when code
-/// changes, names rarely do.
-fn functions(v: &Value) -> HashMap<(String, String, String), f64> {
-    let mut m = HashMap::new();
+/// changes, names rarely do. `whole`: the report's time for every function.
+/// A report saved before wits recorded that has only its hottest lines to
+/// add up: part of a function whose time is spread over many lines, and
+/// nothing of a function that has no line among them.
+fn functions(v: &Value, whole: bool) -> HashMap<FnKey, f64> {
+    let mut m: HashMap<FnKey, f64> = HashMap::new();
+    let s = |x: &Value| x.str().unwrap_or("").to_string();
+    if whole {
+        for f in v.get("functions").arr() {
+            let key = (s(f.get("cause")), s(f.get("func")), s(f.get("file")));
+            if key.0 != "idle" {
+                *m.entry(key).or_default() += f.get("seconds").num().unwrap_or(0.0);
+            }
+        }
+        return m;
+    }
     for c in v.get("code").get("causes").arr() {
-        let cause = c.get("cause").str().unwrap_or("").to_string();
+        let cause = s(c.get("cause"));
         if cause == "idle" {
             continue;
         }
         for h in c.get("hot").arr() {
             let f = h.get("frame");
-            let key = (
-                cause.clone(),
-                f.get("func").str().unwrap_or("").to_string(),
-                f.get("file").str().unwrap_or("").to_string(),
-            );
+            let key = (cause.clone(), s(f.get("func")), s(f.get("file")));
             *m.entry(key).or_default() += h.get("seconds").num().unwrap_or(0.0);
         }
     }
     m
+}
+
+/// How many components two paths share from the end: 2 for
+/// "/src/base/lib/f.c" and "/src/new/lib/f.c".
+fn common_tail(a: &str, b: &str) -> usize {
+    a.rsplit('/').zip(b.rsplit('/')).take_while(|(x, y)| x == y).count()
+}
+
+/// The same source tree in another place (a second checkout, a build
+/// directory, a container) has the same functions: by path alone each of
+/// them would be reported twice, as gone and as new. A function seen only
+/// before and one of the same name seen only after are one function when
+/// their files have the same name and each is the other's closest match:
+/// the longest shared end of the path, with no tie. Its time before then
+/// goes under the file it has after.
+fn pair_moved(fa: &mut HashMap<FnKey, f64>, fb: &HashMap<FnKey, f64>) {
+    // The one of `others` whose file shares the longest end with `k`'s.
+    fn closest<'a>(k: &FnKey, others: &[&'a FnKey]) -> Option<&'a FnKey> {
+        let tail = |o: &FnKey| common_tail(&k.2, &o.2);
+        let best = others.iter().map(|o| tail(o)).max().filter(|t| *t > 0)?;
+        let mut same = others.iter().filter(|o| tail(o) == best);
+        match (same.next(), same.next()) {
+            (Some(o), None) => Some(*o),
+            _ => None,
+        }
+    }
+    // Seen on one side only, by cause and name: (before, after).
+    type Sides<'a> = (Vec<&'a FnKey>, Vec<&'a FnKey>);
+    let mut by_name: HashMap<(&str, &str), Sides> = HashMap::new();
+    for k in fa.keys().filter(|k| !k.2.is_empty() && !fb.contains_key(*k)) {
+        by_name.entry((&k.0, &k.1)).or_default().0.push(k);
+    }
+    for k in fb.keys().filter(|k| !k.2.is_empty() && !fa.contains_key(*k)) {
+        by_name.entry((&k.0, &k.1)).or_default().1.push(k);
+    }
+    let mut moved: Vec<(FnKey, FnKey)> = Vec::new();
+    for (before, after) in by_name.values() {
+        for a in before {
+            if let Some(b) = closest(a, after).filter(|b| closest(b, before) == Some(*a)) {
+                moved.push(((*a).clone(), b.clone()));
+            }
+        }
+    }
+    for (a, b) in moved {
+        if let Some(x) = fa.remove(&a) {
+            fa.insert(b, x);
+        }
+    }
 }
 
 fn runs(v: &Value) -> Vec<f64> {
@@ -634,13 +702,29 @@ pub fn diff(a: &Args) -> i32 {
         .filter(|(_, x, y)| (x - y).abs() >= 0.01 && (x - y).abs() >= 0.03 * x.max(*y))
         .collect();
     cause_rows.sort_by(|a, b| (b.2 - b.1).abs().total_cmp(&(a.2 - a.1).abs()));
-    let (fa, fb) = (functions(&va), functions(&vb));
+    // A report saved before wits recorded every function's time has stacks
+    // (`code`) but no `functions`. One that has must not be compared with
+    // one that has not, so then both are compared by their hottest lines.
+    let old = |v: &Value| v.get("functions").is_null() && !v.get("code").is_null();
+    let whole = !old(&va) && !old(&vb);
+    let (mut fa, fb) = (functions(&va, whole), functions(&vb, whole));
+    pair_moved(&mut fa, &fb);
     // Compare functions only for causes both runs have stacks for: a run
-    // without root has no on-CPU stacks, and that is not a speedup.
-    let causes_of = |m: &HashMap<(String, String, String), f64>| -> std::collections::HashSet<String> {
-        m.keys().map(|k| k.0.clone()).collect()
+    // without root has no on-CPU stacks, and that is not a speedup. A cause
+    // has stacks when it has a hot spot; its functions may all be too small
+    // to be listed, and a function that went there did get faster.
+    let causes_of = |v: &Value| -> std::collections::HashSet<String> {
+        v.get("code")
+            .get("causes")
+            .arr()
+            .iter()
+            .filter(|c| !c.get("hot").arr().is_empty())
+            .filter_map(|c| c.get("cause").str())
+            .filter(|c| *c != "idle")
+            .map(str::to_string)
+            .collect()
     };
-    let (ca_set, cb_set) = (causes_of(&fa), causes_of(&fb));
+    let (ca_set, cb_set) = (causes_of(&va), causes_of(&vb));
     let src = |v: &Value| v.get("code").get("source").str().unwrap_or("none").to_string();
     let mut notes = Vec::new();
     if src(&va) != src(&vb) {
@@ -658,19 +742,25 @@ pub fn diff(a: &Args) -> i32 {
             }
         ));
     }
-    let mut keys: Vec<&(String, String, String)> = fa
+    let mut keys: Vec<&FnKey> = fa
         .keys()
         .chain(fb.keys())
         .filter(|k| ca_set.contains(&k.0) && cb_set.contains(&k.0))
         .collect();
     keys.sort();
     keys.dedup();
-    let mut fn_rows: Vec<(&(String, String, String), f64, f64)> = keys
+    let mut fn_rows: Vec<(&FnKey, f64, f64)> = keys
         .into_iter()
         .map(|k| (k, fa.get(k).copied().unwrap_or(0.0), fb.get(k).copied().unwrap_or(0.0)))
         .filter(|(_, x, y)| (x - y).abs() >= 0.005)
         .collect();
     fn_rows.sort_by(|a, b| (b.2 - b.1).abs().total_cmp(&(a.2 - a.1).abs()));
+    if !whole && !fn_rows.is_empty() {
+        notes.push(
+            "functions are compared by their hottest lines only, not as a whole: a report was saved by an older wits (run it again for whole functions)"
+                .to_string(),
+        );
+    }
     let (ca, cb) = (va.get("cpu_ms").num().unwrap_or(0.0), vb.get("cpu_ms").num().unwrap_or(0.0));
 
     if a.json || a.html.is_some() {
@@ -755,4 +845,80 @@ pub fn diff(a: &Args) -> i32 {
     }
     println!("{}", out.join("\n"));
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(cause: &str, func: &str, file: &str) -> FnKey {
+        (cause.into(), func.into(), file.into())
+    }
+
+    #[test]
+    fn diff_reads_whole_functions() {
+        // `work` has 0.9s; its hottest line, the only one in `hot`, has 0.2s.
+        let v = json::parse(concat!(
+            r#"{"kind":"run","code":{"causes":["#,
+            r#"{"cause":"cpu","seconds":1.0,"hot":[{"seconds":0.2,"frame":{"func":"work","file":"/src/w.c","line":7}}]},"#,
+            r#"{"cause":"idle","seconds":5.0,"hot":[{"seconds":5.0,"frame":{"func":"wait","file":null,"line":null}}]}]},"#,
+            r#""functions":[{"cause":"cpu","func":"work","file":"/src/w.c","seconds":0.9},"#,
+            r#"{"cause":"cpu","func":"other","file":null,"seconds":0.1}]}"#
+        ))
+        .unwrap();
+        let whole = functions(&v, true);
+        assert_eq!(whole.len(), 2);
+        assert_eq!(whole[&key("cpu", "work", "/src/w.c")], 0.9);
+        assert_eq!(whole[&key("cpu", "other", "")], 0.1);
+        // A report without them: the hottest lines, as before.
+        let lines = functions(&v, false);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[&key("cpu", "work", "/src/w.c")], 0.2);
+    }
+
+    #[test]
+    fn a_moved_tree_is_the_same_functions() {
+        assert_eq!(common_tail("/src/base/lib/f.c", "/src/new/lib/f.c"), 2);
+        assert_eq!(common_tail("/src/base/lib/f.c", "/src/base/lib/g.c"), 0);
+        let map = |v: &[(&str, &str, &str, f64)]| -> HashMap<FnKey, f64> {
+            v.iter().map(|(c, f, p, s)| (key(c, f, p), *s)).collect()
+        };
+        let mut before = map(&[
+            // Another checkout: the same file under another directory.
+            ("cpu", "sort", "/src/base/lib/deflate.c", 0.767),
+            // Two files of one name: each goes with the one that shares more of its path.
+            ("cpu", "init", "/src/base/zlib/util.c", 0.3),
+            ("cpu", "init", "/src/base/gzip/util.c", 0.2),
+            // Nothing to tell these apart: left alone.
+            ("cpu", "get", "/a/api.py", 0.1),
+            // Another file, another cause, no file: not the same function.
+            ("cpu", "parse", "/src/base/json.c", 0.4),
+            ("disk", "flush", "/src/base/log.c", 0.5),
+            ("cpu", "hidden", "", 0.6),
+            // In the same place on both sides.
+            ("cpu", "main", "/src/main.c", 0.7),
+        ]);
+        let after = map(&[
+            ("cpu", "sort", "/src/new/lib/deflate.c", 0.741),
+            ("cpu", "init", "/src/new/gzip/util.c", 0.25),
+            ("cpu", "init", "/src/new/zlib/util.c", 0.35),
+            ("cpu", "get", "/b/api.py", 0.1),
+            ("cpu", "get", "/c/api.py", 0.1),
+            ("cpu", "parse", "/src/new/xml.c", 0.4),
+            ("cpu", "flush", "/src/new/log.c", 0.5),
+            ("cpu", "main", "/src/main.c", 0.6),
+        ]);
+        pair_moved(&mut before, &after);
+        let expect = map(&[
+            ("cpu", "sort", "/src/new/lib/deflate.c", 0.767),
+            ("cpu", "init", "/src/new/zlib/util.c", 0.3),
+            ("cpu", "init", "/src/new/gzip/util.c", 0.2),
+            ("cpu", "get", "/a/api.py", 0.1),
+            ("cpu", "parse", "/src/base/json.c", 0.4),
+            ("disk", "flush", "/src/base/log.c", 0.5),
+            ("cpu", "hidden", "", 0.6),
+            ("cpu", "main", "/src/main.c", 0.7),
+        ]);
+        assert_eq!(before, expect);
+    }
 }
