@@ -7,12 +7,12 @@
     "url": "https://github.com/aryehlev/wits",
     "source": "github"
   },
-  "version": "2.2.2",
+  "version": "2.2.3",
   "packages": [
     {
       "registryType": "cargo",
       "identifier": "wits",
-      "version": "2.2.2",
+      "version": "2.2.3",
       "transport": {
         "type": "stdio"
       },
