@@ -22,66 +22,7 @@ tree to where the time goes ([See it](#see-it)).
 after ten minutes with `top`, `iotop`, `strace`, `lsof`, `/proc/locks` and a
 profiler.
 
-## For coding agents
-
-If you are a coding agent and something is slow, hanging or stuck, measure
-before you guess:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/aryehlev/wits/main/install.sh | sh   # one binary, no root
-wits --json <pid|name>        # why is it slow: cause, object, who is to blame, function and line
-wits --json                   # don't know which process? the ones waiting most right now
-wits run -n 5 -o before.json -- <command...>   # before a change; again with -o after.json
-wits diff --json before.json after.json        # did it help? verdict: faster | slower | no clear change
-wits guide <language>         # what usually fixes it in python, node, go, rust, jvm, dotnet, ruby, beam, c
-wits on <where> --json <pid|name>   # the same on another machine: [user@]host, gcp:<vm>, aws:<vm>, azure:<group>/<vm>
-```
-
-- Read `summary`, `cause`, `what`, `where` and `blame`. When `blame.kind`
-  is `process`, ask wits about `blame.pid` next, until the answer is `cpu`,
-  `disk`, `memory`, a cgroup limit, a remote host or an idle process.
-- Read `code.lang` and `code.hints` too: the costs wits knows by name, with
-  their measured share ("42% of the CPU time is allocation and garbage
-  collection"), and what usually fixes each. Then read `wits guide` for that
-  language before you choose a fix (see
-  [What kind of work it is](#what-kind-of-work-it-is)).
-- Report the `diff` verdict as it is: `no clear change` is not a speedup. Only
-  repeat (`-n`) commands that are safe to run again.
-- Pick fixes by **0.7 × gain + 0.3 × ease** and make the highest-scoring one
-  first, one at a time (see [Choosing what to change](#choosing-what-to-change)).
-- MCP: `claude mcp add wits -- wits mcp` (any MCP client: command `wits`,
-  argument `mcp`) gives you `wits_explain`, `wits_overview`, `wits_profile`,
-  `wits_run`, `wits_diff`, `wits_remote` and `wits_guide`. Hosts that show pages (MCP Apps) also get the
-  [profile view](#see-it). For skills, copy
-  [`skills/why-is-this-slow`](skills/why-is-this-slow/SKILL.md).
-- Another machine: `wits on <where> --json <pid|name>` runs wits there over
-  ssh, or on a cloud VM by its name, and gives the same answer; `--sudo` to
-  see other users' processes (see
-  [On another machine](#on-another-machine-in-any-cloud)).
-- Kubernetes: `wits --json <namespace>/<pod>` or `<namespace>/<deployment>`
-  on a node, or `kubectl wits -n <namespace> deploy/<name> --json` from
-  anywhere (see [Kubernetes](#kubernetes)).
-- wits never changes or signals the processes it watches. Without `sudo` it
-  sees only your own processes, and on Linux no on-CPU stacks.
-
-```console
-$ wits deploy
-deploy (pid 2655) is waiting for a lock: 100% of its time over the last 2.0s
-  what   the file lock on /root/wits-demo/schema.lock
-  blame  held by pid 2652 (migrate …/schema.lock …/warehouse 600), which is only waiting for its child pid 2654 (warehouse)
-
-$ wits fs
-fs (pid 4148) is waiting for disk: 97% of its time over the last 2.0s
-  what   fsync() on /home/ubuntu/t/log.bin, device sda1 (100% busy)
-  where  100% in flush_log (…/ubuntu/t/fs.c:4) ← main (…/ubuntu/t/fs.c:5)
-  blame  its own I/O: it read 0 B, wrote 5.3 MB; no other visible process is doing more
-  also   cpu 3%
-
-$ wits shop/api-7d9f
-python3 (pid 6723, pod shop/api-7d9f/api) is waiting for another process: 100% of its time over the last 2.0s
-  what   blocked in recvfrom() on fd 3, TCP 10.20.0.1:45476 → 10.20.0.2:5432 (postgres)
-  blame  pid 6719 (python3 …/server.py, pod db/pg-0/postgres), which is itself waiting for disk
-```
+If you are a coding agent, start with [For coding agents](#for-coding-agents).
 
 ## Install
 
@@ -120,6 +61,27 @@ wits on <where> <any of the above> # on another machine: [user@]host, gcp:, aws:
 wits mcp                     # an MCP server for coding agents
 ```
 
+For example:
+
+```console
+$ wits deploy
+deploy (pid 2655) is waiting for a lock: 100% of its time over the last 2.0s
+  what   the file lock on /root/wits-demo/schema.lock
+  blame  held by pid 2652 (migrate …/schema.lock …/warehouse 600), which is only waiting for its child pid 2654 (warehouse)
+
+$ wits fs
+fs (pid 4148) is waiting for disk: 97% of its time over the last 2.0s
+  what   fsync() on /home/ubuntu/t/log.bin, device sda1 (100% busy)
+  where  100% in flush_log (…/ubuntu/t/fs.c:4) ← main (…/ubuntu/t/fs.c:5)
+  blame  its own I/O: it read 0 B, wrote 5.3 MB; no other visible process is doing more
+  also   cpu 3%
+
+$ wits shop/api-7d9f
+python3 (pid 6723, pod shop/api-7d9f/api) is waiting for another process: 100% of its time over the last 2.0s
+  what   blocked in recvfrom() on fd 3, TCP 10.20.0.1:45476 → 10.20.0.2:5432 (postgres)
+  blame  pid 6719 (python3 …/server.py, pod db/pg-0/postgres), which is itself waiting for disk
+```
+
 | Option | Meaning |
 | --- | --- |
 | `-t, --time <secs>` | how long to watch (default 2) |
@@ -137,7 +99,12 @@ follows the chain down and explains the child that is actually doing the
 waiting. If the process is not slow at all (asleep on a timer, waiting at a
 prompt, a server with no requests) wits says so instead of inventing a cause.
 
-## The six causes
+## What it tells you
+
+Every answer is one of six causes, with what it is waiting on (`what`), who
+is to blame (`blame`) and the code responsible (`where`).
+
+### The six causes
 
 | Cause | The process is… | wits names | and blames |
 | --- | --- | --- | --- |
@@ -150,7 +117,7 @@ prompt, a server with no requests) wits says so instead of inventing a cause.
 
 That is the whole list. wits does not guess beyond it.
 
-## Where in the code
+### Where in the code
 
 The `where` line names the function, file and line responsible for the cause,
 and its caller. `wits profile` shows every cause with its hottest call paths:
@@ -172,18 +139,8 @@ lockm (pid 9733) is waiting for a lock: 99% of its time over the last 2.0s
 
 Stacks are split by cause, not just by CPU time: a function that spends its
 time in `fsync` shows under `disk`, one queued on a mutex under `lock`. That
-is the part an on-CPU profiler cannot show you.
-
-How the stacks are collected:
-
-| | Time on CPU | Time blocked |
-| --- | --- | --- |
-| Linux, as root | eBPF: a 499 Hz CPU-clock sampler | eBPF: every context switch, with its stack and how long it was off CPU |
-| Linux, no root | not available (a note says so) | the stack of each blocked thread, read from `/proc/<pid>/mem` |
-| macOS | `/usr/bin/sample` | `/usr/bin/sample` |
-
-The eBPF programs are assembled inside wits and loaded with the `bpf()`
-system call: no compiler, no BTF, no libbpf, nothing to install.
+is the part an on-CPU profiler cannot show you. [How it works](#how-it-works)
+says how the stacks are collected.
 
 Languages:
 
@@ -240,7 +197,7 @@ in any language: N+1 queries, connections, fsync, container limits, builds
 and tests. The same text is in the
 [skill](skills/why-is-this-slow/guides) and behind the `wits_guide` MCP tool.
 
-### See it
+## See it
 
 Add `--html <file>` to any command and wits also writes its answer as one
 self-contained web page you can explore:
@@ -346,6 +303,104 @@ Make the highest-scoring change first, one at a time, and measure each with
 that buys no speed is not worth keeping. The skill, the MCP server and the
 page's "Ask your agent" prompt all tell coding agents to work this way and to
 show you their scores next to what wits measured.
+
+## For coding agents
+
+If you are a coding agent and something is slow, hanging or stuck, measure
+before you guess:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/aryehlev/wits/main/install.sh | sh   # one binary, no root
+wits --json <pid|name>        # why is it slow: cause, object, who is to blame, function and line
+wits --json                   # don't know which process? the ones waiting most right now
+wits run -n 5 -o before.json -- <command...>   # before a change; again with -o after.json
+wits diff --json before.json after.json        # did it help? verdict: faster | slower | no clear change
+wits guide <language>         # what usually fixes it in python, node, go, rust, jvm, dotnet, ruby, beam, c
+wits on <where> --json <pid|name>   # the same on another machine: [user@]host, gcp:<vm>, aws:<vm>, azure:<group>/<vm>
+```
+
+- Read `summary`, `cause`, `what`, `where` and `blame`. When `blame.kind`
+  is `process`, ask wits about `blame.pid` next, until the answer is `cpu`,
+  `disk`, `memory`, a cgroup limit, a remote host or an idle process.
+- Read `code.lang` and `code.hints` too: the costs wits knows by name, with
+  their measured share ("42% of the CPU time is allocation and garbage
+  collection"), and what usually fixes each. Then read `wits guide` for that
+  language before you choose a fix (see
+  [What kind of work it is](#what-kind-of-work-it-is)).
+- Report the `diff` verdict as it is: `no clear change` is not a speedup. Only
+  repeat (`-n`) commands that are safe to run again.
+- Pick fixes by **0.7 × gain + 0.3 × ease** and make the highest-scoring one
+  first, one at a time (see [Choosing what to change](#choosing-what-to-change)).
+- Another machine: `wits on <where> --json <pid|name>` runs wits there over
+  ssh, or on a cloud VM by its name, and gives the same answer; `--sudo` to
+  see other users' processes (see
+  [On another machine](#on-another-machine-in-any-cloud)).
+- Kubernetes: `wits --json <namespace>/<pod>` or `<namespace>/<deployment>`
+  on a node, or `kubectl wits -n <namespace> deploy/<name> --json` from
+  anywhere (see [Kubernetes](#kubernetes)).
+- wits never changes or signals the processes it watches. Without `sudo` it
+  sees only your own processes, and on Linux no on-CPU stacks.
+
+### MCP server
+
+`wits mcp` is an MCP server on stdin and stdout. Add it to Claude Code with
+
+```sh
+claude mcp add wits -- wits mcp
+```
+
+or to any MCP client as the command `wits` with the argument `mcp`, for
+example:
+
+```json
+{ "mcpServers": { "wits": { "command": "wits", "args": ["mcp"] } } }
+```
+
+| Tool | Does |
+| --- | --- |
+| `wits_explain` | why one or more processes, pods or workloads are slow (`target` or `targets`, `seconds`) |
+| `wits_overview` | the processes waiting most right now |
+| `wits_profile` | one process, with every stack by cause, for a flame graph |
+| `wits_run` | run a command (`command`, `repeat`, `save`, `cwd`) and report where its time went |
+| `wits_diff` | compare two saved runs: faster, slower or no clear change |
+| `wits_remote` | explain, overview or profile on another machine (`on`: `[user@]host`, `gcp:…`, `aws:…`, `azure:…`; `sudo`) |
+| `wits_guide` | what usually makes a program in one language slow and what usually fixes it (`topic`: a language, or `general`) |
+
+All but the last run `wits` with `--json` and return that answer, as text and
+as structured content, so each does exactly what the command does. Each can
+also write the [page](#see-it) to a file (`html_file`); hosts that support
+MCP Apps show the page with the result. `wits_remote` is
+[`wits on`](#on-another-machine-in-any-cloud): it is marked as reaching
+outside this machine, so a host can ask you before it is used, and it never
+asks for a password. `wits_guide` returns a
+[guide](#what-kind-of-work-it-is) as text. The server tells the agent how to
+use them: measure first, follow the blame, read the hints and the guide for
+the program's language, rank fixes by
+[gain and ease](#choosing-what-to-change), and report a `diff` verdict as it
+is. In the [MCP Registry](https://registry.modelcontextprotocol.io) it is
+`mcp-name: io.github.aryehlev/wits`. To give it root (eBPF stacks, other
+users' processes), register `sudo wits mcp` instead, if you trust the agent
+with that.
+
+### Skill
+
+For agents that read skills (Claude Code and others),
+`skills/why-is-this-slow/SKILL.md` teaches when to run wits, how to read
+the answer, and how to check a fix with `wits run` and `wits diff`. Next to
+it, `guides/` has a page per language (Python, Node.js, Go, Rust, the JVM,
+.NET, Ruby, Erlang and Elixir, C and C++) and one for any language; the agent
+reads the one that matches `code.lang`. Copy the folder into your skills
+directory:
+
+```sh
+mkdir -p ~/.claude/skills
+cp -r skills/why-is-this-slow ~/.claude/skills/
+```
+
+Then ask: *"the test run is crawling, why?"* The agent runs wits, reads
+`cause`, `what`, `where` and `blame`, and acts on a fact instead of a guess.
+After changing the code it runs `wits diff` and reports whether the change
+helped.
 
 ## On another machine, in any cloud
 
@@ -490,7 +545,13 @@ your RBAC decides who may ask. Outside Kubernetes the same works with
 `wits agent --listen <addr:port>` on each machine and `--peers` (or
 `WITS_PEERS`) on the client, with the token in `WITS_TOKEN`.
 
-## macOS
+## Requirements
+
+Linux on x86_64 or aarch64, best on kernel 5.16 or later (older kernels give
+less detail when the system call is not readable); eBPF stacks need 4.9 or
+later. macOS on Apple silicon or Intel.
+
+### macOS
 
 The same commands, answers and JSON. Without `sudo`, wits sees your own
 processes fully: per-thread CPU and queued time from `libproc`, stacks with
@@ -504,65 +565,6 @@ blocked `read()` is on is inferred, with lower confidence when there are
 several candidates; `sample` takes a moment to attach, so in `wits run`
 processes that live under 60 ms have no stacks and runs shorter than about
 half a second undercount function time; and there is no agent.
-
-## Coding agents: MCP server and skill
-
-`wits mcp` is an MCP server on stdin and stdout. Add it to Claude Code with
-
-```sh
-claude mcp add wits -- wits mcp
-```
-
-or to any MCP client as the command `wits` with the argument `mcp`, for
-example:
-
-```json
-{ "mcpServers": { "wits": { "command": "wits", "args": ["mcp"] } } }
-```
-
-| Tool | Does |
-| --- | --- |
-| `wits_explain` | why one or more processes, pods or workloads are slow (`target` or `targets`, `seconds`) |
-| `wits_overview` | the processes waiting most right now |
-| `wits_profile` | one process, with every stack by cause, for a flame graph |
-| `wits_run` | run a command (`command`, `repeat`, `save`, `cwd`) and report where its time went |
-| `wits_diff` | compare two saved runs: faster, slower or no clear change |
-| `wits_remote` | explain, overview or profile on another machine (`on`: `[user@]host`, `gcp:…`, `aws:…`, `azure:…`; `sudo`) |
-| `wits_guide` | what usually makes a program in one language slow and what usually fixes it (`topic`: a language, or `general`) |
-
-All but the last run `wits` with `--json` and return that answer, as text and
-as structured content, so each does exactly what the command does. Each can
-also write the [page](#see-it) to a file (`html_file`); hosts that support
-MCP Apps show the page with the result. `wits_remote` is
-[`wits on`](#on-another-machine-in-any-cloud): it is marked as reaching
-outside this machine, so a host can ask you before it is used, and it never
-asks for a password. `wits_guide` returns a
-[guide](#what-kind-of-work-it-is) as text. The server tells the agent how to
-use them: measure first, follow the blame, read the hints and the guide for
-the program's language, rank fixes by
-[gain and ease](#choosing-what-to-change), and report a `diff` verdict as it
-is. In the [MCP Registry](https://registry.modelcontextprotocol.io) it is
-`mcp-name: io.github.aryehlev/wits`. To give it root (eBPF stacks, other
-users' processes), register `sudo wits mcp` instead, if you trust the agent
-with that.
-
-For agents that read skills (Claude Code and others),
-`skills/why-is-this-slow/SKILL.md` teaches when to run wits, how to read
-the answer, and how to check a fix with `wits run` and `wits diff`. Next to
-it, `guides/` has a page per language (Python, Node.js, Go, Rust, the JVM,
-.NET, Ruby, Erlang and Elixir, C and C++) and one for any language; the agent
-reads the one that matches `code.lang`. Copy the folder into your skills
-directory:
-
-```sh
-mkdir -p ~/.claude/skills
-cp -r skills/why-is-this-slow ~/.claude/skills/
-```
-
-Then ask: *"the test run is crawling, why?"* The agent runs wits, reads
-`cause`, `what`, `where` and `blame`, and acts on a fact instead of a guess.
-After changing the code it runs `wits diff` and reports whether the change
-helped.
 
 ## How it works
 
@@ -587,6 +589,17 @@ On Linux, wits watches every thread of the process for two seconds:
 - Stacks come from eBPF (as root) or from each blocked thread's stack in
   `/proc/<pid>/mem`, and are named with `blazesym` from the binaries' symbols
   and DWARF, or from runtime perf maps.
+
+How the stacks are collected:
+
+| | Time on CPU | Time blocked |
+| --- | --- | --- |
+| Linux, as root | eBPF: a 499 Hz CPU-clock sampler | eBPF: every context switch, with its stack and how long it was off CPU |
+| Linux, no root | not available (a note says so) | the stack of each blocked thread, read from `/proc/<pid>/mem` |
+| macOS | `/usr/bin/sample` | `/usr/bin/sample` |
+
+The eBPF programs are assembled inside wits and loaded with the `bpf()`
+system call: no compiler, no BTF, no libbpf, nothing to install.
 
 ## When it is wrong
 
@@ -637,12 +650,6 @@ On Linux, wits watches every thread of the process for two seconds:
 Each case in [`cases/`](cases) starts one slow condition and states the answer
 wits must give. `cases/run.sh` runs them all; it is the test suite. Run it as
 root as well to cover eBPF stacks, cgroup limits, pods, replicas across nodes and agents.
-
-## Requirements
-
-Linux on x86_64 or aarch64, best on kernel 5.16 or later (older kernels give
-less detail when the system call is not readable); eBPF stacks need 4.9 or
-later. macOS on Apple silicon or Intel.
 
 ## License
 

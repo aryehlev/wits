@@ -18,60 +18,7 @@ CPU 时的调用栈：eBPF 程序内置在 wits 里，什么都不用装。
 `top` 只给你一个数字。`wits` 直接给出结论，也就是你用 `top`、`iotop`、`strace`、`lsof`、
 `/proc/locks` 和性能分析器查上十分钟才能写出来的那句话。输出为英文。
 
-## 写给编程智能体
-
-如果你是一个编程智能体，遇到了慢、卡住或没有进展的情况，先测量再猜测：
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/aryehlev/wits/main/install.sh | sh   # 一个二进制文件，不需要 root
-wits --json <pid|进程名>        # 为什么慢：原因、具体对象、该怪谁、哪个函数哪一行
-wits --json                    # 不知道是哪个进程？列出现在等待最多的进程
-wits run -n 5 -o before.json -- <命令...>   # 改动之前；改动之后用 -o after.json 再跑一次
-wits diff --json before.json after.json     # 有没有用？结论：faster | slower | no clear change
-wits guide <语言>               # 这种语言里通常怎么修：python、node、go、rust、jvm、dotnet、ruby、beam、c
-wits on <where> --json <pid|进程名>   # 在另一台机器上问同样的问题：[user@]host、gcp:<虚拟机>、aws:<虚拟机>、azure:<资源组>/<虚拟机>
-```
-
-- 读取 `summary`、`cause`、`what`、`where` 和 `blame`。如果 `blame.kind` 是 `process`，
-  接着问 wits `blame.pid` 这个进程，直到答案是 `cpu`、`disk`、`memory`、cgroup 限额、
-  远程主机或一个空闲的进程。
-- 还要读 `code.lang` 和 `code.hints`：wits 按名字认得的开销，带有测量到的占比（“42% 的 CPU
-  时间花在内存分配和垃圾回收上”），以及通常的修法。选择修复方案之前，先读这种语言的
-  `wits guide`（见[这是哪一类开销](#这是哪一类开销)）。
-- 如实报告 `diff` 的结论：`no clear change` 不是提速。只对可以安全重复运行的命令使用 `-n`。
-- 按 **0.7 × 收益 + 0.3 × 容易程度** 给修复方案打分，先做得分最高的，一次只做一个（见
-  [选择改什么](#选择改什么)）。
-- MCP：`claude mcp add wits -- wits mcp`（任何 MCP 客户端：命令 `wits`，参数 `mcp`）提供
-  `wits_explain`、`wits_overview`、`wits_profile`、`wits_run`、`wits_diff`、`wits_remote` 和 `wits_guide`。支持页面的
-  宿主（MCP Apps）还会显示[性能视图](#看得见的结果)。支持 skill 的工具可以复制
-  [`skills/why-is-this-slow`](skills/why-is-this-slow/SKILL.md)。
-- 另一台机器：`wits on <where> --json <pid|进程名>` 通过 ssh 在那边运行 wits，或者按名字找到一台
-  云虚拟机，给出同样的答案；加 `--sudo` 才能看到其他用户的进程（见
-  [在另一台机器上](#在另一台机器上任何云都行)）。
-- Kubernetes：在节点上用 `wits --json <命名空间>/<pod>` 或 `<命名空间>/<deployment>`，
-  在任何地方用 `kubectl wits -n <命名空间> deploy/<名称> --json`（见
-  [Kubernetes](#kubernetes)）。
-- wits 从不修改或向它观察的进程发信号。不用 `sudo` 时只能看到你自己的进程，在 Linux 上
-  也没有 CPU 上的调用栈。
-
-```console
-$ wits deploy
-deploy (pid 2655) is waiting for a lock: 100% of its time over the last 2.0s
-  what   the file lock on /root/wits-demo/schema.lock
-  blame  held by pid 2652 (migrate …/schema.lock …/warehouse 600), which is only waiting for its child pid 2654 (warehouse)
-
-$ wits fs
-fs (pid 4148) is waiting for disk: 97% of its time over the last 2.0s
-  what   fsync() on /home/ubuntu/t/log.bin, device sda1 (100% busy)
-  where  100% in flush_log (…/ubuntu/t/fs.c:4) ← main (…/ubuntu/t/fs.c:5)
-  blame  its own I/O: it read 0 B, wrote 5.3 MB; no other visible process is doing more
-  also   cpu 3%
-
-$ wits shop/api-7d9f
-python3 (pid 6723, pod shop/api-7d9f/api) is waiting for another process: 100% of its time over the last 2.0s
-  what   blocked in recvfrom() on fd 3, TCP 10.20.0.1:45476 → 10.20.0.2:5432 (postgres)
-  blame  pid 6719 (python3 …/server.py, pod db/pg-0/postgres), which is itself waiting for disk
-```
+如果你是编程智能体，请从[写给编程智能体](#写给编程智能体)开始。
 
 ## 安装
 
@@ -109,6 +56,27 @@ wits on <where> <以上任何一种>  # 在另一台机器上：[user@]host、gc
 wits mcp                     # 给编程智能体用的 MCP 服务器
 ```
 
+例如：
+
+```console
+$ wits deploy
+deploy (pid 2655) is waiting for a lock: 100% of its time over the last 2.0s
+  what   the file lock on /root/wits-demo/schema.lock
+  blame  held by pid 2652 (migrate …/schema.lock …/warehouse 600), which is only waiting for its child pid 2654 (warehouse)
+
+$ wits fs
+fs (pid 4148) is waiting for disk: 97% of its time over the last 2.0s
+  what   fsync() on /home/ubuntu/t/log.bin, device sda1 (100% busy)
+  where  100% in flush_log (…/ubuntu/t/fs.c:4) ← main (…/ubuntu/t/fs.c:5)
+  blame  its own I/O: it read 0 B, wrote 5.3 MB; no other visible process is doing more
+  also   cpu 3%
+
+$ wits shop/api-7d9f
+python3 (pid 6723, pod shop/api-7d9f/api) is waiting for another process: 100% of its time over the last 2.0s
+  what   blocked in recvfrom() on fd 3, TCP 10.20.0.1:45476 → 10.20.0.2:5432 (postgres)
+  blame  pid 6719 (python3 …/server.py, pod db/pg-0/postgres), which is itself waiting for disk
+```
+
 | 选项 | 含义 |
 | --- | --- |
 | `-t, --time <秒>` | 观察多久（默认 2 秒） |
@@ -125,7 +93,12 @@ wits mcp                     # 给编程智能体用的 MCP 服务器
 那个子进程。如果进程根本不慢（在定时器上睡眠、在等终端输入、服务器没有请求），wits 会直接
 说明，而不会硬编一个原因。
 
-## 六种原因
+## wits 告诉你什么
+
+每个答案都包括：固定六种之一的原因、它在等的对象（`what`）、该归咎于谁（`blame`），
+以及负责的代码（`where`）。
+
+### 六种原因
 
 | 原因 | 进程正在… | wits 指出 | 归咎于 |
 | --- | --- | --- | --- |
@@ -138,7 +111,7 @@ wits mcp                     # 给编程智能体用的 MCP 服务器
 
 只有这六种，wits 不会猜测这之外的原因。
 
-## 慢在代码的哪里
+### 慢在代码的哪里
 
 `where` 这一行指出造成该原因的函数、文件和行号，以及它的调用者。`wits profile` 列出每一种
 原因及其最热的调用路径：
@@ -159,18 +132,7 @@ lockm (pid 9733) is waiting for a lock: 99% of its time over the last 2.0s
 ```
 
 调用栈按原因划分，而不只是按 CPU 时间：一个把时间花在 `fsync` 上的函数会出现在 `disk` 下，
-一个在互斥锁上排队的函数会出现在 `lock` 下。这正是只看 CPU 的性能分析器看不到的部分。
-
-调用栈是这样收集的：
-
-| | 在 CPU 上的时间 | 阻塞的时间 |
-| --- | --- | --- |
-| Linux，root | eBPF：499 Hz 的 CPU 时钟采样 | eBPF：每一次上下文切换，连同它的调用栈和离开 CPU 的时长 |
-| Linux，非 root | 没有（会有一条说明） | 每个阻塞线程的调用栈，从 `/proc/<pid>/mem` 读取 |
-| macOS | `/usr/bin/sample` | `/usr/bin/sample` |
-
-eBPF 程序在 wits 内部汇编，通过 `bpf()` 系统调用加载：不需要编译器，不需要 BTF，不需要
-libbpf，什么都不用装。
+一个在互斥锁上排队的函数会出现在 `lock` 下。这正是只看 CPU 的性能分析器看不到的部分。调用栈是怎么收集的，见[工作原理](#工作原理)。
 
 语言：
 
@@ -217,7 +179,7 @@ libbpf，什么都不用装。
 fsync、容器限额、构建和测试。同样的文字也在 [skill](skills/why-is-this-slow/guides) 里（英文），
 并且可以通过 MCP 工具 `wits_guide` 取得。
 
-### 看得见的结果
+## 看得见的结果
 
 给任何命令加上 `--html <文件>`，wits 还会把答案写成一个可以点击浏览的自包含网页：
 
@@ -302,6 +264,88 @@ faster: 515ms → 165ms (−68%), beyond run-to-run noise (the runs do not overl
 先做得分最高的改动，一次只做一个，每次都用 `wits run` 和 `wits diff` 测量。如果 diff 显示
 `no clear change`，就撤销它：换不来速度的工作不值得保留。skill、MCP 服务器和页面上的“交给智能体”
 提示词都会要求编程智能体这样做，并把它们估计的分数和 wits 测到的结果一起给你看。
+
+## 写给编程智能体
+
+如果你是一个编程智能体，遇到了慢、卡住或没有进展的情况，先测量再猜测：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/aryehlev/wits/main/install.sh | sh   # 一个二进制文件，不需要 root
+wits --json <pid|进程名>        # 为什么慢：原因、具体对象、该怪谁、哪个函数哪一行
+wits --json                    # 不知道是哪个进程？列出现在等待最多的进程
+wits run -n 5 -o before.json -- <命令...>   # 改动之前；改动之后用 -o after.json 再跑一次
+wits diff --json before.json after.json     # 有没有用？结论：faster | slower | no clear change
+wits guide <语言>               # 这种语言里通常怎么修：python、node、go、rust、jvm、dotnet、ruby、beam、c
+wits on <where> --json <pid|进程名>   # 在另一台机器上问同样的问题：[user@]host、gcp:<虚拟机>、aws:<虚拟机>、azure:<资源组>/<虚拟机>
+```
+
+- 读取 `summary`、`cause`、`what`、`where` 和 `blame`。如果 `blame.kind` 是 `process`，
+  接着问 wits `blame.pid` 这个进程，直到答案是 `cpu`、`disk`、`memory`、cgroup 限额、
+  远程主机或一个空闲的进程。
+- 还要读 `code.lang` 和 `code.hints`：wits 按名字认得的开销，带有测量到的占比（“42% 的 CPU
+  时间花在内存分配和垃圾回收上”），以及通常的修法。选择修复方案之前，先读这种语言的
+  `wits guide`（见[这是哪一类开销](#这是哪一类开销)）。
+- 如实报告 `diff` 的结论：`no clear change` 不是提速。只对可以安全重复运行的命令使用 `-n`。
+- 按 **0.7 × 收益 + 0.3 × 容易程度** 给修复方案打分，先做得分最高的，一次只做一个（见
+  [选择改什么](#选择改什么)）。
+- 另一台机器：`wits on <where> --json <pid|进程名>` 通过 ssh 在那边运行 wits，或者按名字找到一台
+  云虚拟机，给出同样的答案；加 `--sudo` 才能看到其他用户的进程（见
+  [在另一台机器上](#在另一台机器上任何云都行)）。
+- Kubernetes：在节点上用 `wits --json <命名空间>/<pod>` 或 `<命名空间>/<deployment>`，
+  在任何地方用 `kubectl wits -n <命名空间> deploy/<名称> --json`（见
+  [Kubernetes](#kubernetes)）。
+- wits 从不修改或向它观察的进程发信号。不用 `sudo` 时只能看到你自己的进程，在 Linux 上
+  也没有 CPU 上的调用栈。
+
+### MCP 服务器
+
+`wits mcp` 是一个通过标准输入输出通信的 MCP 服务器。在 Claude Code 中添加：
+
+```sh
+claude mcp add wits -- wits mcp
+```
+
+在任何 MCP 客户端中，命令是 `wits`，参数是 `mcp`，例如：
+
+```json
+{ "mcpServers": { "wits": { "command": "wits", "args": ["mcp"] } } }
+```
+
+| 工具 | 作用 |
+| --- | --- |
+| `wits_explain` | 一个或多个进程、pod 或工作负载为什么慢（`target` 或 `targets`、`seconds`） |
+| `wits_overview` | 现在等待最多的进程 |
+| `wits_profile` | 一个进程，以及按原因划分的全部调用栈，用于火焰图 |
+| `wits_run` | 运行一条命令（`command`、`repeat`、`save`、`cwd`），报告时间花在哪里 |
+| `wits_diff` | 比较两次保存的运行：faster、slower 或 no clear change |
+| `wits_remote` | 在另一台机器上做 explain、overview 或 profile（`on`：`[user@]host`、`gcp:…`、`aws:…`、`azure:…`；`sudo`） |
+| `wits_guide` | 某种语言的程序通常慢在哪里、通常怎么修（`topic`：一种语言，或 `general`） |
+
+除最后一个外，这些工具都用 `--json` 运行 `wits`，把结果同时作为文本和结构化内容返回，所以它们和
+对应的命令完全一样。它们都可以把[页面](#看得见的结果)写到文件（`html_file`）；支持 MCP Apps 的
+宿主会把页面和结果一起显示。`wits_remote` 就是 [`wits on`](#在另一台机器上任何云都行)：它被标记为
+会访问本机以外的地方，宿主可以在使用前先问你，而且它从不询问密码。`wits_guide` 以文本返回一份[指南](#这是哪一类开销)。服务器会告诉
+智能体怎么用这些工具：先测量，顺着归因追下去，读提示和程序所用语言的指南，
+按[收益和容易程度](#选择改什么)给修复排序，如实报告 `diff` 的结论。它在
+[MCP Registry](https://registry.modelcontextprotocol.io) 中的名字是
+`mcp-name: io.github.aryehlev/wits`。如果要给它 root 权限（eBPF 调用栈、其他用户的进程），改为注册
+`sudo wits mcp`，前提是你信任这个智能体。
+
+### Skill
+
+对于支持 skill 的智能体（Claude Code 等），`skills/why-is-this-slow/SKILL.md` 教它什么时候
+运行 wits、如何解读结果，以及如何用 `wits run` 和 `wits diff` 检验修复。旁边的 `guides/`
+目录里每种语言有一页（Python、Node.js、Go、Rust、JVM、.NET、Ruby、Erlang 和 Elixir、C 和
+C++），还有一页适用于任何语言；智能体读和 `code.lang` 对应的那一页。把这个目录复制到
+你的 skills 目录：
+
+```sh
+mkdir -p ~/.claude/skills
+cp -r skills/why-is-this-slow ~/.claude/skills/
+```
+
+然后直接问：“测试跑得特别慢，为什么？”智能体会运行 wits，读取 `cause`、`what`、`where` 和
+`blame`，根据事实而不是猜测来行动。改完代码后，它会运行 `wits diff`，告诉你改动有没有用。
 
 ## 在另一台机器上，任何云都行
 
@@ -426,7 +470,12 @@ agent 能做什么，供你判断：它以特权模式和 `hostPID` 运行，这
 在每台机器上运行 `wits agent --listen <地址:端口>`，在客户端用 `--peers`（或
 `WITS_PEERS`），令牌放在 `WITS_TOKEN` 里。
 
-## macOS
+## 系统要求
+
+x86_64 或 aarch64 上的 Linux，内核 5.16 及以上效果最好（在更旧的内核上，如果读不到系统调用
+信息，细节会少一些）；eBPF 调用栈需要 4.9 及以上。Apple 芯片或 Intel 上的 macOS。
+
+### macOS
 
 命令、答案和 JSON 都一样。不用 `sudo` 时，wits 能完整看到你自己的进程：来自 `libproc` 的
 每线程 CPU 时间和排队时间，来自 `/usr/bin/sample` 的带文件和行号的调用栈，以及用来找到另一端
@@ -436,54 +485,6 @@ agent 能做什么，供你判断：它以特权模式和 `hostPID` 运行，这
 "probably"；阻塞的 `read()` 在哪个描述符上是推断出来的，候选有好几个时可信度较低；
 `sample` 需要一点时间才能附加上去，所以在 `wits run` 中，存活不到 60 毫秒的进程没有调用栈，
 不到半秒的运行统计到的函数时间会偏少；macOS 上没有 agent。
-
-## 编程智能体：MCP 服务器和 skill
-
-`wits mcp` 是一个通过标准输入输出通信的 MCP 服务器。在 Claude Code 中添加：
-
-```sh
-claude mcp add wits -- wits mcp
-```
-
-在任何 MCP 客户端中，命令是 `wits`，参数是 `mcp`，例如：
-
-```json
-{ "mcpServers": { "wits": { "command": "wits", "args": ["mcp"] } } }
-```
-
-| 工具 | 作用 |
-| --- | --- |
-| `wits_explain` | 一个或多个进程、pod 或工作负载为什么慢（`target` 或 `targets`、`seconds`） |
-| `wits_overview` | 现在等待最多的进程 |
-| `wits_profile` | 一个进程，以及按原因划分的全部调用栈，用于火焰图 |
-| `wits_run` | 运行一条命令（`command`、`repeat`、`save`、`cwd`），报告时间花在哪里 |
-| `wits_diff` | 比较两次保存的运行：faster、slower 或 no clear change |
-| `wits_remote` | 在另一台机器上做 explain、overview 或 profile（`on`：`[user@]host`、`gcp:…`、`aws:…`、`azure:…`；`sudo`） |
-| `wits_guide` | 某种语言的程序通常慢在哪里、通常怎么修（`topic`：一种语言，或 `general`） |
-
-除最后一个外，这些工具都用 `--json` 运行 `wits`，把结果同时作为文本和结构化内容返回，所以它们和
-对应的命令完全一样。它们都可以把[页面](#看得见的结果)写到文件（`html_file`）；支持 MCP Apps 的
-宿主会把页面和结果一起显示。`wits_remote` 就是 [`wits on`](#在另一台机器上任何云都行)：它被标记为
-会访问本机以外的地方，宿主可以在使用前先问你，而且它从不询问密码。`wits_guide` 以文本返回一份[指南](#这是哪一类开销)。服务器会告诉
-智能体怎么用这些工具：先测量，顺着归因追下去，读提示和程序所用语言的指南，
-按[收益和容易程度](#选择改什么)给修复排序，如实报告 `diff` 的结论。它在
-[MCP Registry](https://registry.modelcontextprotocol.io) 中的名字是
-`mcp-name: io.github.aryehlev/wits`。如果要给它 root 权限（eBPF 调用栈、其他用户的进程），改为注册
-`sudo wits mcp`，前提是你信任这个智能体。
-
-对于支持 skill 的智能体（Claude Code 等），`skills/why-is-this-slow/SKILL.md` 教它什么时候
-运行 wits、如何解读结果，以及如何用 `wits run` 和 `wits diff` 检验修复。旁边的 `guides/`
-目录里每种语言有一页（Python、Node.js、Go、Rust、JVM、.NET、Ruby、Erlang 和 Elixir、C 和
-C++），还有一页适用于任何语言；智能体读和 `code.lang` 对应的那一页。把这个目录复制到
-你的 skills 目录：
-
-```sh
-mkdir -p ~/.claude/skills
-cp -r skills/why-is-this-slow ~/.claude/skills/
-```
-
-然后直接问：“测试跑得特别慢，为什么？”智能体会运行 wits，读取 `cause`、`what`、`where` 和
-`blame`，根据事实而不是猜测来行动。改完代码后，它会运行 `wits diff`，告诉你改动有没有用。
 
 ## 工作原理
 
@@ -502,6 +503,17 @@ cp -r skills/why-is-this-slow ~/.claude/skills/
   `/proc/diskstats` 和 `/proc/*/io` 反映设备负载以及是谁造成的。
 - 调用栈来自 eBPF（root 时）或每个阻塞线程在 `/proc/<pid>/mem` 中的栈，用 `blazesym`
   根据二进制文件的符号和 DWARF 或运行时的 perf map 解析成函数名。
+
+调用栈是这样收集的：
+
+| | 在 CPU 上的时间 | 阻塞的时间 |
+| --- | --- | --- |
+| Linux，root | eBPF：499 Hz 的 CPU 时钟采样 | eBPF：每一次上下文切换，连同它的调用栈和离开 CPU 的时长 |
+| Linux，非 root | 没有（会有一条说明） | 每个阻塞线程的调用栈，从 `/proc/<pid>/mem` 读取 |
+| macOS | `/usr/bin/sample` | `/usr/bin/sample` |
+
+eBPF 程序在 wits 内部汇编，通过 `bpf()` 系统调用加载：不需要编译器，不需要 BTF，不需要
+libbpf，什么都不用装。
 
 ## 什么时候会出错
 
@@ -537,11 +549,6 @@ cp -r skills/why-is-this-slow ~/.claude/skills/
 [`cases/`](cases) 里的每个脚本制造一种慢的情况，并写明 wits 必须给出的答案。
 `cases/run.sh` 会全部运行一遍，这就是测试套件。再用 root 运行一次，可以覆盖 eBPF 调用栈、
 cgroup 限额、pod、跨节点的副本和 agent。
-
-## 系统要求
-
-x86_64 或 aarch64 上的 Linux，内核 5.16 及以上效果最好（在更旧的内核上，如果读不到系统调用
-信息，细节会少一些）；eBPF 调用栈需要 4.9 及以上。Apple 芯片或 Intel 上的 macOS。
 
 ## 许可证
 
