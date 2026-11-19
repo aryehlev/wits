@@ -664,6 +664,67 @@ pub fn summarize(st: &Stacks, per_cause: usize) -> CodeView {
     }
 }
 
+/// A function and how much of one cause's time is its own.
+#[derive(Clone, Debug)]
+pub struct FuncTime {
+    pub cat: Cat,
+    pub func: String,
+    pub file: Option<String>,
+    pub ns: f64,
+}
+
+/// Every function's time for each cause, heaviest first: all of its lines
+/// added up over every stack, where `summarize` keeps the few hottest
+/// lines. A function's time is often spread over many lines, so the hot
+/// spots are only part of it. A stack's time goes to the function a hot
+/// spot would name (`anchor`), so the two agree. Idle time and stacks
+/// nobody could name are left out, and so is less than a millisecond.
+pub fn functions(st: &Stacks) -> Vec<FuncTime> {
+    let kinds: Vec<Kind> = st.frames.iter().map(|f| origin(f).0).collect();
+    let mut by: HashMap<(Cat, &str, Option<&str>), f64> = HashMap::new();
+    for s in st.samples.iter().filter(|s| s.cat != Cat::Idle) {
+        let Some(f) = anchor(st, &kinds, &s.frames).map(|i| &st.frames[i]) else {
+            continue;
+        };
+        if f.func != "[unknown]" {
+            *by.entry((s.cat, f.func.as_str(), f.file.as_deref())).or_default() += s.ns;
+        }
+    }
+    let mut v: Vec<FuncTime> = by
+        .into_iter()
+        .filter(|(_, ns)| *ns >= 1e6)
+        .map(|((cat, func, file), ns)| FuncTime {
+            cat,
+            func: func.to_string(),
+            file: file.map(str::to_string),
+            ns,
+        })
+        .collect();
+    v.sort_by(|a, b| {
+        b.ns.total_cmp(&a.ns)
+            .then_with(|| (a.cat.key(), &a.func, &a.file).cmp(&(b.cat.key(), &b.func, &b.file)))
+    });
+    v
+}
+
+/// `functions` as JSON, for a saved report: `[{cause, func, file, seconds}]`.
+pub fn functions_json(st: &Stacks) -> String {
+    use crate::out::{esc, num};
+    let v: Vec<String> = functions(st)
+        .iter()
+        .map(|f| {
+            format!(
+                "{{\"cause\":{},\"func\":{},\"file\":{},\"seconds\":{}}}",
+                esc(f.cat.key()),
+                esc(&f.func),
+                f.file.as_deref().map(esc).unwrap_or_else(|| "null".into()),
+                num(f.ns / 1e9)
+            )
+        })
+        .collect();
+    format!("[{}]", v.join(","))
+}
+
 fn folded_name(f: &Frame) -> String {
     let n = f.func.replace(';', ":");
     if f.kernel {
@@ -894,6 +955,53 @@ mod tests {
         assert_eq!(cv.get(Cat::Cpu).unwrap().hot[0].frame.func, "app::compute");
         let fo = folded(&st, false);
         assert!(fo.contains("[peer]; (1);main;app::handler;app::db::query;read;pipe_read_[k] 3000000"));
+    }
+
+    #[test]
+    fn functions_add_up_every_line() {
+        let mut st = Stacks::new("test");
+        let at = |func: &str, file: &str, line: u32| Frame {
+            func: func.into(),
+            module: "app".into(),
+            file: Some(file.into()),
+            line: Some(line),
+            kernel: false,
+        };
+        // One function, hot on three lines, one of them inside memcpy.
+        let w: Vec<usize> = (10..13).map(|l| st.intern(at("app::work", "/src/work.rs", l))).collect();
+        let memcpy = st.intern(f("memcpy", "libc.so.6"));
+        let flush = st.intern(at("app::flush", "/src/log.rs", 40));
+        let tiny = st.intern(at("app::tiny", "/src/work.rs", 90));
+        let unknown = st.intern(Frame::unknown("app"));
+        let m = st.intern(f("main", "app"));
+        st.add(1, 1, Cat::Cpu, vec![w[0], m], 2e9);
+        st.add(1, 1, Cat::Cpu, vec![w[1], m], 1e9);
+        st.add(1, 1, Cat::Cpu, vec![w[2], m], 5e8);
+        st.add(1, 1, Cat::Cpu, vec![memcpy, w[2], m], 5e8);
+        st.add(1, 1, Cat::Cpu, vec![flush, m], 3e9);
+        st.add(1, 1, Cat::Disk, vec![flush, m], 1e9);
+        // Not functions to compare: under a millisecond, unnamed, idle.
+        st.add(1, 1, Cat::Cpu, vec![tiny, m], 5e5);
+        st.add(1, 1, Cat::Cpu, vec![unknown], 1e9);
+        st.add(1, 1, Cat::Idle, vec![w[0], m], 9e9);
+
+        // The hottest line is the other function's; this one's are behind it.
+        let cv = summarize(&st, 1);
+        let hot = &cv.get(Cat::Cpu).unwrap().hot;
+        assert_eq!((hot.len(), hot[0].frame.func.as_str(), hot[0].ns), (1, "app::flush", 3e9));
+
+        let fns = functions(&st);
+        let got: Vec<(&str, &str, f64)> = fns.iter().map(|x| (x.cat.key(), x.func.as_str(), x.ns)).collect();
+        assert_eq!(got, [("cpu", "app::work", 4e9), ("cpu", "app::flush", 3e9), ("disk", "app::flush", 1e9)]);
+        assert_eq!(fns[0].file.as_deref(), Some("/src/work.rs"));
+        assert_eq!(
+            functions_json(&st),
+            concat!(
+                r#"[{"cause":"cpu","func":"app::work","file":"/src/work.rs","seconds":4.000},"#,
+                r#"{"cause":"cpu","func":"app::flush","file":"/src/log.rs","seconds":3.000},"#,
+                r#"{"cause":"disk","func":"app::flush","file":"/src/log.rs","seconds":1.000}]"#
+            )
+        );
     }
 
     fn ff(func: &str, module: &str, file: Option<&str>) -> Frame {

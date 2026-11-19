@@ -222,6 +222,9 @@ pub struct Report {
     pub cpu_ns: f64,
     pub procs: Vec<ProcRow>,
     pub code: Option<CodeView>,
+    /// Every function's time per cause (`code::functions_json`): what
+    /// `wits diff` compares. `code` has only the hottest lines.
+    pub functions: Option<String>,
     /// Every stack, for a flame graph (`code::flame_json`).
     pub flame: Option<String>,
     pub notes: Vec<String>,
@@ -313,6 +316,7 @@ fn build(cmd: &[String], runs: Vec<RunResult>) -> Report {
         cv.notes.clear();
         cv
     });
+    let functions = (!merged.is_empty()).then(|| code::functions_json(&merged));
     let flame = (!merged.is_empty()).then(|| code::flame_json(&merged, 2000));
     // Time nothing accounts for: no thread ran, and what they waited on has
     // no name. A program asleep on a timer (a retry back-off) looks like this,
@@ -337,6 +341,7 @@ fn build(cmd: &[String], runs: Vec<RunResult>) -> Report {
         cpu_ns,
         procs,
         code,
+        functions,
         flame,
         notes,
     }
@@ -461,6 +466,9 @@ pub fn json(r: &Report) -> String {
             .map(crate::out::code_json)
             .unwrap_or_else(|| "null".into())
     ));
+    if let Some(fns) = &r.functions {
+        f.push(format!("\"functions\":{fns}"));
+    }
     if let Some(fl) = &r.flame {
         f.push(format!("\"flame\":{fl}"));
     }
@@ -535,22 +543,34 @@ fn load(path: &str) -> Value {
     v
 }
 
+/// A function in a report: (cause, function, file).
+type FnKey = (String, String, String);
+
 /// Function seconds by (cause, function, file): lines move when code
-/// changes, names rarely do.
-fn functions(v: &Value) -> HashMap<(String, String, String), f64> {
-    let mut m = HashMap::new();
+/// changes, names rarely do. `whole`: the report's time for every function.
+/// A report saved before wits recorded that has only its hottest lines to
+/// add up: part of a function whose time is spread over many lines, and
+/// nothing of a function that has no line among them.
+fn functions(v: &Value, whole: bool) -> HashMap<FnKey, f64> {
+    let mut m: HashMap<FnKey, f64> = HashMap::new();
+    let s = |x: &Value| x.str().unwrap_or("").to_string();
+    if whole {
+        for f in v.get("functions").arr() {
+            let key = (s(f.get("cause")), s(f.get("func")), s(f.get("file")));
+            if key.0 != "idle" {
+                *m.entry(key).or_default() += f.get("seconds").num().unwrap_or(0.0);
+            }
+        }
+        return m;
+    }
     for c in v.get("code").get("causes").arr() {
-        let cause = c.get("cause").str().unwrap_or("").to_string();
+        let cause = s(c.get("cause"));
         if cause == "idle" {
             continue;
         }
         for h in c.get("hot").arr() {
             let f = h.get("frame");
-            let key = (
-                cause.clone(),
-                f.get("func").str().unwrap_or("").to_string(),
-                f.get("file").str().unwrap_or("").to_string(),
-            );
+            let key = (cause.clone(), s(f.get("func")), s(f.get("file")));
             *m.entry(key).or_default() += h.get("seconds").num().unwrap_or(0.0);
         }
     }
@@ -634,13 +654,28 @@ pub fn diff(a: &Args) -> i32 {
         .filter(|(_, x, y)| (x - y).abs() >= 0.01 && (x - y).abs() >= 0.03 * x.max(*y))
         .collect();
     cause_rows.sort_by(|a, b| (b.2 - b.1).abs().total_cmp(&(a.2 - a.1).abs()));
-    let (fa, fb) = (functions(&va), functions(&vb));
+    // A report saved before wits recorded every function's time has stacks
+    // (`code`) but no `functions`. One that has must not be compared with
+    // one that has not, so then both are compared by their hottest lines.
+    let old = |v: &Value| v.get("functions").is_null() && !v.get("code").is_null();
+    let whole = !old(&va) && !old(&vb);
+    let (fa, fb) = (functions(&va, whole), functions(&vb, whole));
     // Compare functions only for causes both runs have stacks for: a run
-    // without root has no on-CPU stacks, and that is not a speedup.
-    let causes_of = |m: &HashMap<(String, String, String), f64>| -> std::collections::HashSet<String> {
-        m.keys().map(|k| k.0.clone()).collect()
+    // without root has no on-CPU stacks, and that is not a speedup. A cause
+    // has stacks when it has a hot spot; its functions may all be too small
+    // to be listed, and a function that went there did get faster.
+    let causes_of = |v: &Value| -> std::collections::HashSet<String> {
+        v.get("code")
+            .get("causes")
+            .arr()
+            .iter()
+            .filter(|c| !c.get("hot").arr().is_empty())
+            .filter_map(|c| c.get("cause").str())
+            .filter(|c| *c != "idle")
+            .map(str::to_string)
+            .collect()
     };
-    let (ca_set, cb_set) = (causes_of(&fa), causes_of(&fb));
+    let (ca_set, cb_set) = (causes_of(&va), causes_of(&vb));
     let src = |v: &Value| v.get("code").get("source").str().unwrap_or("none").to_string();
     let mut notes = Vec::new();
     if src(&va) != src(&vb) {
@@ -658,19 +693,25 @@ pub fn diff(a: &Args) -> i32 {
             }
         ));
     }
-    let mut keys: Vec<&(String, String, String)> = fa
+    let mut keys: Vec<&FnKey> = fa
         .keys()
         .chain(fb.keys())
         .filter(|k| ca_set.contains(&k.0) && cb_set.contains(&k.0))
         .collect();
     keys.sort();
     keys.dedup();
-    let mut fn_rows: Vec<(&(String, String, String), f64, f64)> = keys
+    let mut fn_rows: Vec<(&FnKey, f64, f64)> = keys
         .into_iter()
         .map(|k| (k, fa.get(k).copied().unwrap_or(0.0), fb.get(k).copied().unwrap_or(0.0)))
         .filter(|(_, x, y)| (x - y).abs() >= 0.005)
         .collect();
     fn_rows.sort_by(|a, b| (b.2 - b.1).abs().total_cmp(&(a.2 - a.1).abs()));
+    if !whole && !fn_rows.is_empty() {
+        notes.push(
+            "functions are compared by their hottest lines only, not as a whole: a report was saved by an older wits (run it again for whole functions)"
+                .to_string(),
+        );
+    }
     let (ca, cb) = (va.get("cpu_ms").num().unwrap_or(0.0), vb.get("cpu_ms").num().unwrap_or(0.0));
 
     if a.json || a.html.is_some() {
@@ -755,4 +796,34 @@ pub fn diff(a: &Args) -> i32 {
     }
     println!("{}", out.join("\n"));
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(cause: &str, func: &str, file: &str) -> FnKey {
+        (cause.into(), func.into(), file.into())
+    }
+
+    #[test]
+    fn diff_reads_whole_functions() {
+        // `work` has 0.9s; its hottest line, the only one in `hot`, has 0.2s.
+        let v = json::parse(concat!(
+            r#"{"kind":"run","code":{"causes":["#,
+            r#"{"cause":"cpu","seconds":1.0,"hot":[{"seconds":0.2,"frame":{"func":"work","file":"/src/w.c","line":7}}]},"#,
+            r#"{"cause":"idle","seconds":5.0,"hot":[{"seconds":5.0,"frame":{"func":"wait","file":null,"line":null}}]}]},"#,
+            r#""functions":[{"cause":"cpu","func":"work","file":"/src/w.c","seconds":0.9},"#,
+            r#"{"cause":"cpu","func":"other","file":null,"seconds":0.1}]}"#
+        ))
+        .unwrap();
+        let whole = functions(&v, true);
+        assert_eq!(whole.len(), 2);
+        assert_eq!(whole[&key("cpu", "work", "/src/w.c")], 0.9);
+        assert_eq!(whole[&key("cpu", "other", "")], 0.1);
+        // A report without them: the hottest lines, as before.
+        let lines = functions(&v, false);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[&key("cpu", "work", "/src/w.c")], 0.2);
+    }
 }
