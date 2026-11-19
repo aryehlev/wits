@@ -11,6 +11,11 @@ No root needed; with root it sees more.
 
 ![wits demo](demo/demo.gif)
 
+![the dive following the heat down black's parser, from format_file_in_place to Parser._addtoken, where 12% of the time is spent](demo/dive.webp)
+
+With `--html` the same answer is a page you can explore: dive down the call
+tree to where the time goes ([See it](#see-it)).
+
 `top` shows you a number. `wits` gives you the sentence you would have written
 after ten minutes with `top`, `iotop`, `strace`, `lsof`, `/proc/locks` and a
 profiler.
@@ -256,9 +261,6 @@ source (`sudo env PYTHONPERFSUPPORT=1 wits run --html black.html -- black
   waits. **Follow the heat** swims down to where wits says to start (the
   first time you see it, it does so by itself); drag to swim, scroll to dive,
   click a function to dive into it, and the sonar shows where you are.
-
-  ![the dive following the heat down black's parser, from format_file_in_place to Parser._addtoken, where 12% of the time is spent](demo/dive.webp)
-
 - **Explore.** The same time as an animated flame graph: click to zoom, hover
   to light up a function everywhere it appears, search, and **Only my code**
   to fold away the runtime between your functions. **Top functions** ranks
